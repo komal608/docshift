@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DocShift – Smart Document Tools</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #07050f;
+      --purple-deep: #3b0764;
+      --purple-mid: #6d28d9;
+      --purple-bright: #a855f7;
+      --purple-glow: #c084fc;
+      --accent: #22d3ee;
+      --accent2: #10b981;
+      --glass-bg: rgba(255,255,255,0.04);
+      --glass-border: rgba(168,85,247,0.18);
+      --glass-hover: rgba(168,85,247,0.09);
+      --text: #f0e6ff;
+      --text-muted: rgba(200,180,230,0.6);
+      --card-shadow: 0 8px 40px rgba(109,40,217,0.18);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── ANIMATED BG ── */
+    .bg-orbs {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    }
+    .orb {
+      position: absolute; border-radius: 50%;
+      filter: blur(80px); opacity: 0.22; animation: orbFloat 12s ease-in-out infinite alternate;
+    }
+    .orb1 { width:500px;height:500px;background:radial-gradient(circle,#6d28d9,transparent);top:-100px;left:-120px;animation-delay:0s;}
+    .orb2 { width:380px;height:380px;background:radial-gradient(circle,#a855f7,transparent);top:40%;right:-80px;animation-delay:3s;}
+    .orb3 { width:300px;height:300px;background:radial-gradient(circle,#22d3ee,transparent);bottom:-60px;left:35%;animation-delay:6s;}
+    .orb4 { width:220px;height:220px;background:radial-gradient(circle,#10b981,transparent);top:20%;left:60%;animation-delay:9s;opacity:0.12;}
+    @keyframes orbFloat {
+      from{transform:translateY(0) scale(1);}
+      to{transform:translateY(-40px) scale(1.08);}
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 6%; height: 68px;
+      background: rgba(7,5,15,0.72);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--glass-border);
+    }
+    .nav-logo {
+      font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.5rem;
+      color: #fff; display: flex; align-items: center; gap: 10px; text-decoration: none;
+    }
+    .nav-logo span {
+      display: inline-block; width: 30px; height: 30px;
+      background: linear-gradient(135deg, var(--purple-mid), var(--accent));
+      border-radius: 8px; position: relative;
+    }
+    .nav-logo span::before {
+      content:'≡'; position:absolute; inset:0; display:flex; align-items:center;
+      justify-content:center; font-size:1.1rem; color:#fff;
+    }
+    .nav-links { display:flex; gap:2rem; list-style:none; }
+    .nav-links a {
+      color: var(--text-muted); text-decoration: none; font-size: 0.92rem;
+      font-weight: 500; transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--purple-glow); }
+    .nav-cta {
+      background: linear-gradient(135deg, var(--purple-mid), #9333ea);
+      color: #fff; border: none; padding: 10px 24px; border-radius: 10px;
+      font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.9rem;
+      cursor: pointer; text-decoration: none; transition: all 0.25s;
+      box-shadow: 0 0 20px rgba(109,40,217,0.35);
+    }
+    .nav-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 30px rgba(168,85,247,0.55);
+    }
+
+    /* ── HERO ── */
+    .hero {
+      position: relative; z-index: 1;
+      min-height: 100vh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 120px 6% 80px;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(168,85,247,0.12); border: 1px solid rgba(168,85,247,0.3);
+      border-radius: 50px; padding: 6px 18px; font-size: 0.8rem;
+      color: var(--purple-glow); margin-bottom: 2rem; font-weight: 500;
+      animation: fadeDown 0.6s ease both;
+    }
+    .hero-badge::before { content:'✦'; font-size:0.7rem; }
+    .hero-title {
+      font-family: 'Syne', sans-serif; font-weight: 800;
+      font-size: clamp(2.6rem, 6vw, 5.2rem); line-height: 1.08;
+      letter-spacing: -0.03em; max-width: 800px;
+      animation: fadeDown 0.7s ease 0.1s both;
+    }
+    .hero-title .grad {
+      background: linear-gradient(135deg, #a855f7 0%, #22d3ee 60%, #10b981 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      margin-top: 1.6rem; font-size: 1.15rem; color: var(--text-muted);
+      max-width: 540px; line-height: 1.7; font-weight: 300;
+      animation: fadeDown 0.7s ease 0.2s both;
+    }
+    .hero-actions {
+      margin-top: 2.8rem; display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;
+      animation: fadeDown 0.7s ease 0.32s both;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--purple-mid), #9333ea);
+      color: #fff; border: none; padding: 15px 36px; border-radius: 12px;
+      font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem;
+      cursor: pointer; text-decoration: none; transition: all 0.25s;
+      box-shadow: 0 4px 30px rgba(109,40,217,0.4);
+    }
+    .btn-primary:hover { transform:translateY(-3px); box-shadow:0 10px 40px rgba(168,85,247,0.55); }
+    .btn-ghost {
+      background: var(--glass-bg); color: var(--text);
+      border: 1px solid var(--glass-border); padding: 15px 36px; border-radius: 12px;
+      font-family: 'Syne', sans-serif; font-weight: 600; font-size: 1rem;
+      cursor: pointer; text-decoration: none; transition: all 0.25s;
+      backdrop-filter: blur(10px);
+    }
+    .btn-ghost:hover { background: var(--glass-hover); border-color: var(--purple-bright); transform:translateY(-2px); }
+
+    .hero-stats {
+      margin-top: 3.5rem; display: flex; gap: 3rem; flex-wrap: wrap; justify-content: center;
+      animation: fadeDown 0.7s ease 0.42s both;
+    }
+    .stat { text-align: center; }
+    .stat-num {
+      font-family: 'Syne', sans-serif; font-size: 2rem; font-weight: 800;
+      background: linear-gradient(135deg, #a855f7, #22d3ee);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .stat-label { font-size: 0.82rem; color: var(--text-muted); margin-top: 2px; }
+
+    .hero-scroll {
+      position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em;
+      animation: bounce 2s ease infinite;
+    }
+    .hero-scroll span { width:1px; height:36px; background:linear-gradient(to bottom,rgba(168,85,247,0.6),transparent); }
+    @keyframes bounce { 0%,100%{transform:translateX(-50%) translateY(0);} 50%{transform:translateX(-50%) translateY(8px);} }
+
+    @keyframes fadeDown { from{opacity:0;transform:translateY(-20px);} to{opacity:1;transform:translateY(0);} }
+
+    /* ── SECTION COMMONS ── */
+    section { position: relative; z-index: 1; }
+    .section-inner { max-width: 1160px; margin: 0 auto; padding: 0 6%; }
+    .section-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.75rem; color: var(--purple-glow); text-transform: uppercase;
+      letter-spacing: 0.14em; font-weight: 600; margin-bottom: 1rem;
+    }
+    .section-tag::before { content:''; display:block; width:24px; height:2px; background:var(--purple-bright); border-radius:2px; }
+    .section-title {
+      font-family: 'Syne', sans-serif; font-weight: 800;
+      font-size: clamp(1.8rem, 3.5vw, 2.8rem); line-height: 1.15;
+    }
+    .section-desc { color: var(--text-muted); margin-top: 0.8rem; font-size: 1.05rem; line-height: 1.7; }
+
+    /* ── FEATURES ── */
+    .features { padding: 100px 0; }
+    .features-header { text-align: center; margin-bottom: 4rem; }
+    .features-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem;
+    }
+    .feature-card {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 18px; padding: 2rem;
+      backdrop-filter: blur(16px);
+      transition: all 0.3s;
+      position: relative; overflow: hidden;
+    }
+    .feature-card::before {
+      content:''; position:absolute; inset:0;
+      background: linear-gradient(135deg, rgba(168,85,247,0.06), transparent);
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .feature-card:hover { border-color: rgba(168,85,247,0.4); transform:translateY(-5px); box-shadow: var(--card-shadow); }
+    .feature-card:hover::before { opacity: 1; }
+    .feature-icon {
+      width: 52px; height: 52px; border-radius: 14px; display: flex;
+      align-items: center; justify-content: center; font-size: 1.5rem; margin-bottom: 1.2rem;
+    }
+    .feature-name {
+      font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.05rem; margin-bottom: 0.5rem;
+    }
+    .feature-desc { color: var(--text-muted); font-size: 0.92rem; line-height: 1.65; }
+    .feature-tag {
+      display: inline-block; margin-top: 1rem; padding: 3px 10px;
+      background: rgba(168,85,247,0.12); border: 1px solid rgba(168,85,247,0.25);
+      border-radius: 50px; font-size: 0.72rem; color: var(--purple-glow); font-weight: 500;
+    }
+
+    /* ── LIVE DEMO ── */
+    .demo-section { padding: 100px 0; }
+    .demo-container {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--glass-border);
+      border-radius: 28px;
+      overflow: hidden;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 20px 80px rgba(109,40,217,0.18);
+    }
+    .demo-tabs {
+      display: flex; border-bottom: 1px solid var(--glass-border);
+      padding: 0 2rem; background: rgba(7,5,15,0.5);
+    }
+    .demo-tab {
+      padding: 1rem 1.5rem; border: none; background: none; color: var(--text-muted);
+      font-family: 'DM Sans', sans-serif; font-size: 0.88rem; font-weight: 500;
+      cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.25s;
+      position: relative; top: 1px;
+    }
+    .demo-tab.active { color: var(--purple-glow); border-bottom-color: var(--purple-bright); }
+    .demo-tab:hover:not(.active) { color: var(--text); }
+    .demo-body { padding: 2.5rem; min-height: 420px; }
+    .demo-panel { display: none; }
+    .demo-panel.active { display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap; }
+
+    .demo-input-area { flex: 1; min-width: 260px; }
+    .demo-label { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.6rem; font-weight: 500; }
+    .demo-drop {
+      border: 2px dashed rgba(168,85,247,0.35);
+      border-radius: 14px; padding: 2.5rem 1.5rem;
+      text-align: center; cursor: pointer; transition: all 0.25s;
+      background: rgba(168,85,247,0.04);
+    }
+    .demo-drop:hover { border-color: var(--purple-bright); background: rgba(168,85,247,0.08); }
+    .demo-drop-icon { font-size: 2.2rem; margin-bottom: 0.8rem; }
+    .demo-drop-text { font-size: 0.88rem; color: var(--text-muted); }
+    .demo-drop-text strong { color: var(--purple-glow); }
+    .demo-controls { margin-top: 1.5rem; display: flex; flex-direction: column; gap: 0.8rem; }
+    .demo-select {
+      background: rgba(255,255,255,0.06); border: 1px solid var(--glass-border);
+      border-radius: 10px; padding: 10px 14px; color: var(--text);
+      font-family: 'DM Sans', sans-serif; font-size: 0.88rem; width: 100%;
+    }
+    .demo-select option { background: #1a0a2e; }
+    .demo-run-btn {
+      background: linear-gradient(135deg, var(--purple-mid), #9333ea);
+      color: #fff; border: none; padding: 12px 28px; border-radius: 10px;
+      font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.9rem;
+      cursor: pointer; transition: all 0.25s; width: 100%;
+    }
+    .demo-run-btn:hover { box-shadow: 0 6px 26px rgba(168,85,247,0.45); transform: translateY(-1px); }
+    .demo-run-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .demo-output-area { flex: 1; min-width: 260px; }
+    .demo-output {
+      background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px; padding: 1.5rem; min-height: 240px;
+      font-size: 0.88rem; line-height: 1.75; color: var(--text-muted);
+      position: relative; overflow: hidden;
+    }
+    .demo-output .placeholder { color: rgba(200,180,230,0.3); text-align: center; margin-top: 3rem; }
+    .demo-output.loading::after {
+      content:''; position:absolute; inset:0;
+      background: linear-gradient(90deg, transparent, rgba(168,85,247,0.06), transparent);
+      animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer { from{transform:translateX(-100%);} to{transform:translateX(100%);} }
+    .demo-result-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 50px; font-size: 0.75rem; font-weight: 600; margin-bottom: 1rem;
+    }
+    .demo-result-badge.success { background: rgba(16,185,129,0.14); color: #10b981; border: 1px solid rgba(16,185,129,0.28); }
+    .demo-result-badge.processing { background: rgba(168,85,247,0.14); color: var(--purple-glow); border: 1px solid rgba(168,85,247,0.28); }
+
+    /* Chat demo panel */
+    .chat-demo { flex-direction: column; gap: 0; }
+    .chat-messages {
+      background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px 14px 0 0; padding: 1.5rem;
+      height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;
+    }
+    .chat-messages::-webkit-scrollbar { width: 4px; }
+    .chat-messages::-webkit-scrollbar-track { background: transparent; }
+    .chat-messages::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.3); border-radius: 4px; }
+    .chat-msg { display: flex; gap: 10px; max-width: 85%; }
+    .chat-msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .chat-avatar {
+      width: 32px; height: 32px; border-radius: 50%; display: flex;
+      align-items: center; justify-content: center; font-size: 0.8rem; flex-shrink: 0;
+    }
+    .chat-avatar.ai { background: linear-gradient(135deg, var(--purple-mid), #9333ea); }
+    .chat-avatar.user { background: rgba(34,211,238,0.2); border: 1px solid rgba(34,211,238,0.3); color: var(--accent); }
+    .chat-bubble {
+      padding: 10px 14px; border-radius: 14px; font-size: 0.88rem; line-height: 1.6;
+    }
+    .chat-msg.ai .chat-bubble { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.2); }
+    .chat-msg.user .chat-bubble { background: rgba(34,211,238,0.08); border: 1px solid rgba(34,211,238,0.2); color: var(--text); }
+    .chat-input-row {
+      display: flex; gap: 0;
+      border: 1px solid var(--glass-border); border-top: none; border-radius: 0 0 14px 14px; overflow: hidden;
+    }
+    .chat-input {
+      flex: 1; background: rgba(255,255,255,0.04); border: none;
+      padding: 14px 18px; color: var(--text); font-family: 'DM Sans', sans-serif;
+      font-size: 0.92rem; outline: none;
+    }
+    .chat-input::placeholder { color: rgba(200,180,230,0.35); }
+    .chat-send {
+      background: linear-gradient(135deg, var(--purple-mid), #9333ea);
+      border: none; padding: 0 22px; color: #fff; font-size: 1.1rem;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .chat-send:hover { opacity: 0.9; }
+
+    /* ── HOW IT WORKS ── */
+    .how-section { padding: 100px 0; }
+    .steps { display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 3.5rem; position: relative; }
+    .steps::before {
+      content:''; position:absolute; top:36px; left:calc(36px + 1rem); right:calc(36px + 1rem);
+      height: 1px; background: linear-gradient(90deg, var(--purple-mid), var(--accent));
+      opacity: 0.25;
+    }
+    .step { flex: 1; min-width: 200px; text-align: center; }
+    .step-num {
+      width: 72px; height: 72px; border-radius: 50%; display: flex;
+      align-items: center; justify-content: center; margin: 0 auto 1.4rem;
+      font-family: 'Syne', sans-serif; font-size: 1.3rem; font-weight: 800;
+      position: relative; z-index: 1;
+    }
+    .step-num-1 { background: linear-gradient(135deg, #6d28d9, #9333ea); box-shadow: 0 0 30px rgba(109,40,217,0.5); }
+    .step-num-2 { background: linear-gradient(135deg, #7c3aed, #a855f7); box-shadow: 0 0 30px rgba(168,85,247,0.4); }
+    .step-num-3 { background: linear-gradient(135deg, #9333ea, #22d3ee); box-shadow: 0 0 30px rgba(34,211,238,0.35); }
+    .step-num-4 { background: linear-gradient(135deg, #22d3ee, #10b981); box-shadow: 0 0 30px rgba(34,211,238,0.3); }
+    .step-title { font-family: 'Syne', sans-serif; font-weight: 700; margin-bottom: 0.5rem; }
+    .step-desc { color: var(--text-muted); font-size: 0.9rem; line-height: 1.65; }
+
+    /* ── TOOLS GRID ── */
+    .tools-section { padding: 100px 0; }
+    .tools-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 3rem; }
+    .tool-card {
+      background: var(--glass-bg); border: 1px solid var(--glass-border);
+      border-radius: 16px; padding: 1.4rem 1.5rem; display: flex; align-items: center; gap: 14px;
+      text-decoration: none; color: var(--text); transition: all 0.25s;
+      backdrop-filter: blur(12px); cursor: pointer;
+    }
+    .tool-card:hover { border-color: rgba(168,85,247,0.4); transform: translateY(-3px); background: var(--glass-hover); box-shadow: var(--card-shadow); }
+    .tool-icon { font-size: 1.6rem; width: 44px; height: 44px; display:flex; align-items:center; justify-content:center; border-radius:10px; flex-shrink:0; }
+    .tool-info .tool-name { font-family:'Syne',sans-serif; font-weight:700; font-size:0.9rem; }
+    .tool-info .tool-desc { color:var(--text-muted); font-size:0.78rem; margin-top:2px; }
+    .tool-new { font-size:0.65rem; background:var(--purple-mid); color:#fff; border-radius:4px; padding:2px 6px; font-weight:700; margin-left:6px; }
+
+    /* ── TESTIMONIALS ── */
+    .testimonials { padding: 100px 0; }
+    .testimonials-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.4rem; margin-top: 3rem; }
+    .testimonial {
+      background: var(--glass-bg); border: 1px solid var(--glass-border);
+      border-radius: 18px; padding: 1.8rem; backdrop-filter: blur(12px);
+      transition: all 0.3s;
+    }
+    .testimonial:hover { transform: translateY(-4px); border-color: rgba(168,85,247,0.35); }
+    .testimonial-quote { font-size: 0.95rem; line-height: 1.75; color: var(--text-muted); margin-bottom: 1.4rem; }
+    .testimonial-quote::before { content:'"'; font-size:2rem; color:var(--purple-bright); line-height:0; vertical-align:-0.4em; margin-right:4px; }
+    .testimonial-author { display: flex; align-items: center; gap: 10px; }
+    .t-avatar { width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.85rem; font-weight:700; flex-shrink:0; }
+    .t-name { font-family:'Syne',sans-serif; font-weight:700; font-size:0.88rem; }
+    .t-role { color:var(--text-muted); font-size:0.78rem; }
+    .stars { color:#fbbf24; font-size:0.8rem; margin-bottom:0.8rem; }
+
+    /* ── CTA SECTION ── */
+    .cta-section { padding: 100px 0; }
+    .cta-card {
+      background: linear-gradient(135deg, rgba(109,40,217,0.18) 0%, rgba(168,85,247,0.08) 50%, rgba(34,211,238,0.06) 100%);
+      border: 1px solid rgba(168,85,247,0.25);
+      border-radius: 32px; padding: 5rem 4rem; text-align: center;
+      backdrop-filter: blur(20px);
+      position: relative; overflow: hidden;
+    }
+    .cta-card::before {
+      content:''; position:absolute; top:-60%;left:20%;right:20%;
+      height:60%; background:radial-gradient(ellipse,rgba(168,85,247,0.15),transparent);
+    }
+    .cta-card .section-title { font-size: clamp(2rem, 4vw, 3.2rem); }
+    .cta-card .section-desc { max-width: 480px; margin: 0.8rem auto 0; }
+    .cta-buttons { margin-top: 2.5rem; display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--glass-border);
+      padding: 2.5rem 6%; display: flex; align-items: center;
+      justify-content: space-between; flex-wrap: wrap; gap: 1rem;
+      background: rgba(7,5,15,0.6); position: relative; z-index: 1;
+    }
+    .footer-logo { font-family:'Syne',sans-serif; font-weight:800; font-size:1.1rem; color:#fff; text-decoration:none; }
+    .footer-copy { color:var(--text-muted); font-size:0.82rem; }
+    .footer-links { display:flex; gap:1.5rem; list-style:none; }
+    .footer-links a { color:var(--text-muted); text-decoration:none; font-size:0.82rem; transition:color 0.2s; }
+    .footer-links a:hover { color:var(--purple-glow); }
+
+    /* ── ANIMATIONS ── */
+    .fade-up {
+      opacity: 0; transform: translateY(30px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    .fade-up.visible { opacity: 1; transform: translateY(0); }
+
+    /* ── RESPONSIVE ── */
+    @media(max-width: 768px) {
+      .nav-links { display: none; }
+      .steps::before { display: none; }
+      .demo-panel.active { flex-direction: column; }
+      .cta-card { padding: 3rem 1.5rem; }
+      footer { flex-direction: column; align-items: flex-start; }
+    }
+
+    /* Login modal overlay */
+    .login-hint {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: rgba(7,5,15,0.85); backdrop-filter: blur(10px);
+      align-items: center; justify-content: center;
+    }
+    .login-hint.open { display: flex; }
+    .login-hint-card {
+      background: rgba(255,255,255,0.05); border: 1px solid var(--glass-border);
+      border-radius: 24px; padding: 3rem; text-align: center; max-width: 400px; width: 90%;
+      backdrop-filter: blur(30px); animation: popIn 0.35s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes popIn { from{transform:scale(0.85);opacity:0;} to{transform:scale(1);opacity:1;} }
+    .login-hint-icon { font-size: 3rem; margin-bottom: 1rem; }
+    .login-hint-title { font-family:'Syne',sans-serif; font-weight:800; font-size:1.5rem; margin-bottom:0.6rem; }
+    .login-hint-desc { color:var(--text-muted); font-size:0.92rem; line-height:1.65; margin-bottom:2rem; }
+    .login-hint-actions { display:flex; gap:1rem; justify-content:center; }
+    .close-hint { position:absolute; top:1.5rem; right:1.8rem; background:none; border:none; color:var(--text-muted); font-size:1.4rem; cursor:pointer; }
+  </style>
+</head>
+<body>
+
+<!-- Animated BG -->
+<div class="bg-orbs">
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+  <div class="orb orb4"></div>
+</div>
+
+<!-- ── NAV ── -->
+<nav>
+  <a href="#" class="nav-logo">
+    <span></span>DocShift
+  </a>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#tools">Tools</a></li>
+    <li><a href="#demo">Live Demo</a></li>
+    <li><a href="#how">How It Works</a></li>
+  </ul>
+  <a href="/login" class="nav-cta">Login →</a>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="hero-badge">Powered by AI · Document Intelligence</div>
+  <h1 class="hero-title">
+    The Smarter Way to Handle<br/><span class="grad">Every Document</span>
+  </h1>
+  <p class="hero-sub">
+    Merge, split, convert, compress, analyze, and transform your PDFs and documents — all in one powerful platform powered by AI.
+  </p>
+  <div class="hero-actions">
+    <a href="/login" class="btn-primary">Get Started Free</a>
+    <a href="#demo" class="btn-ghost">Try Live Demo</a>
+  </div>
+  <div class="hero-stats">
+    <div class="stat"><div class="stat-num">225+</div><div class="stat-label">Files Processed</div></div>
+    <div class="stat"><div class="stat-num">12+</div><div class="stat-label">AI-Powered Tools</div></div>
+    <div class="stat"><div class="stat-num">15+</div><div class="stat-label">Companies Trust Us</div></div>
+    <div class="stat"><div class="stat-num">99%</div><div class="stat-label">Uptime</div></div>
+  </div>
+  <div class="hero-scroll">Scroll <span></span></div>
+</section>
+
+<!-- ── FEATURES ── -->
+<section class="features" id="features">
+  <div class="section-inner">
+    <div class="features-header fade-up">
+      <div class="section-tag">What we offer</div>
+      <h2 class="section-title">Built for Modern Document Workflows</h2>
+      <p class="section-desc">Every tool you need to work with documents smarter — no installations, no limits.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card fade-up">
+        <div class="feature-icon" style="background:rgba(109,40,217,0.18);">🤖</div>
+        <div class="feature-name">AI PDF Editor</div>
+        <div class="feature-desc">Edit, restructure, and enhance PDFs using natural language instructions. Just describe what you want.</div>
+        <span class="feature-tag">AI-Powered</span>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon" style="background:rgba(34,211,238,0.12);">📋</div>
+        <div class="feature-name">Resume Analyzer</div>
+        <div class="feature-desc">Upload resumes and get detailed AI-generated summaries. Chat with the AI to compare candidates intelligently.</div>
+        <span class="feature-tag">AI-Powered</span>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon" style="background:rgba(16,185,129,0.12);">🔊</div>
+        <div class="feature-name">Speech to Text & TTS</div>
+        <div class="feature-desc">Convert audio files to text instantly, or listen to your documents with natural-sounding speech synthesis.</div>
+        <span class="feature-tag">Real-time</span>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon" style="background:rgba(251,191,36,0.1);">🔄</div>
+        <div class="feature-name">PDF Comparison</div>
+        <div class="feature-desc">Compare two PDF versions side-by-side with AI-detected changes. Export reports as PDF or DOCX.</div>
+        <span class="feature-tag">AI-Powered</span>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon" style="background:rgba(239,68,68,0.1);">🖼️</div>
+        <div class="feature-name">Background Remover</div>
+        <div class="feature-desc">Remove image backgrounds instantly with AI precision. Perfect for professional document assets.</div>
+        <span class="feature-tag">AI-Powered</span>
+      </div>
+      <div class="feature-card fade-up">
+        <div class="feature-icon" style="background:rgba(168,85,247,0.12);">📦</div>
+        <div class="feature-name">Merge, Split & Compress</div>
+        <div class="feature-desc">Combine multiple PDFs, extract specific pages, or shrink file sizes — all without quality loss.</div>
+        <span class="feature-tag">Lightning Fast</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── LIVE DEMO ── -->
+<section class="demo-section" id="demo">
+  <div class="section-inner">
+    <div class="fade-up" style="margin-bottom:2.5rem;">
+      <div class="section-tag">Interactive</div>
+      <h2 class="section-title">Try DocShift Live</h2>
+      <p class="section-desc">Experience our tools instantly — no sign-up required for the demo.</p>
+    </div>
+    <div class="demo-container fade-up">
+      <div class="demo-tabs">
+        <button class="demo-tab active" onclick="switchTab('pdf-merge')">📄 Merge PDFs</button>
+        <button class="demo-tab" onclick="switchTab('word-count')">📊 Text Analysis</button>
+        <button class="demo-tab" onclick="switchTab('ai-chat')">🤖 AI Chat</button>
+      </div>
+      <div class="demo-body">
+
+        <!-- Tab: PDF Merge Demo -->
+        <div class="demo-panel active" id="tab-pdf-merge">
+          <div class="demo-input-area">
+            <div class="demo-label">Upload PDF files to merge</div>
+            <div class="demo-drop" id="merge-drop" onclick="document.getElementById('merge-files').click()">
+              <div class="demo-drop-icon">📂</div>
+              <div class="demo-drop-text"><strong>Click to select</strong> or drag & drop<br/>PDF files here</div>
+            </div>
+            <input type="file" id="merge-files" multiple accept=".pdf" style="display:none" onchange="handleMergeFiles(event)"/>
+            <div class="demo-controls">
+              <select class="demo-select" id="merge-output-name">
+                <option>merged_output.pdf</option>
+                <option>combined_document.pdf</option>
+                <option>custom_name.pdf</option>
+              </select>
+              <button class="demo-run-btn" onclick="runMergeDemo()" id="merge-btn" disabled>Merge PDFs →</button>
+            </div>
+          </div>
+          <div class="demo-output-area">
+            <div class="demo-label">Result preview</div>
+            <div class="demo-output" id="merge-output">
+              <div class="placeholder">Select PDF files to see a merge preview here…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Text Analysis -->
+        <div class="demo-panel" id="tab-word-count">
+          <div class="demo-input-area">
+            <div class="demo-label">Paste or type your text</div>
+            <textarea id="text-input" style="width:100%;height:180px;background:rgba(255,255,255,0.04);border:1px solid var(--glass-border);border-radius:12px;padding:14px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:0.9rem;resize:vertical;outline:none;line-height:1.7;" placeholder="Paste any text here to analyze..."></textarea>
+            <div class="demo-controls">
+              <button class="demo-run-btn" onclick="runTextAnalysis()">Analyze Text →</button>
+            </div>
+          </div>
+          <div class="demo-output-area">
+            <div class="demo-label">Analysis results</div>
+            <div class="demo-output" id="text-output">
+              <div class="placeholder">Paste text to see analysis…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: AI Chat Demo -->
+        <div class="demo-panel chat-demo" id="tab-ai-chat">
+          <div class="demo-label">Chat with DocShift AI (demo mode)</div>
+          <div class="chat-messages" id="chat-messages">
+            <div class="chat-msg ai">
+              <div class="chat-avatar ai">🤖</div>
+              <div class="chat-bubble">Hi! I'm DocShift AI. Ask me anything about PDF tools, document processing, or how DocShift can help your workflow!</div>
+            </div>
+          </div>
+          <div class="chat-input-row">
+            <input class="chat-input" id="chat-input" type="text" placeholder="Ask about DocShift features…" onkeydown="if(event.key==='Enter')sendChat()"/>
+            <button class="chat-send" onclick="sendChat()">➤</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <p style="text-align:center;margin-top:1.2rem;color:var(--text-muted);font-size:0.85rem;">
+      Want full access? <a href="/login" style="color:var(--purple-glow);font-weight:600;">Login to DocShift →</a>
+    </p>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ── -->
+<section class="how-section" id="how">
+  <div class="section-inner">
+    <div class="fade-up" style="text-align:center;margin-bottom:0;">
+      <div class="section-tag">Process</div>
+      <h2 class="section-title">How DocShift Works</h2>
+      <p class="section-desc">Four simple steps from upload to done.</p>
+    </div>
+    <div class="steps">
+      <div class="step fade-up">
+        <div class="step-num step-num-1">1</div>
+        <div class="step-title">Upload Your Files</div>
+        <div class="step-desc">Drag & drop PDFs, Word docs, images, audio — DocShift accepts them all securely.</div>
+      </div>
+      <div class="step fade-up">
+        <div class="step-num step-num-2">2</div>
+        <div class="step-title">Choose Your Tool</div>
+        <div class="step-desc">Pick from 12+ AI-powered tools tailored for every document task imaginable.</div>
+      </div>
+      <div class="step fade-up">
+        <div class="step-num step-num-3">3</div>
+        <div class="step-title">AI Processes It</div>
+        <div class="step-desc">Our AI engine analyzes, transforms, and optimizes your document with precision.</div>
+      </div>
+      <div class="step fade-up">
+        <div class="step-num step-num-4">4</div>
+        <div class="step-title">Download & Share</div>
+        <div class="step-desc">Get your processed file instantly — stored securely with full history access.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── TOOLS GRID ── -->
+<section class="tools-section" id="tools">
+  <div class="section-inner">
+    <div class="fade-up" style="margin-bottom:0;">
+      <div class="section-tag">All Tools</div>
+      <h2 class="section-title">12+ Tools, One Platform</h2>
+      <p class="section-desc">Everything you need — always just one click away.</p>
+    </div>
+    <div class="tools-grid fade-up">
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(109,40,217,0.15);">📄</div>
+        <div class="tool-info"><div class="tool-name">Merge PDFs</div><div class="tool-desc">Combine multiple files</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(34,211,238,0.1);">✂️</div>
+        <div class="tool-info"><div class="tool-name">Split PDF</div><div class="tool-desc">Extract pages quickly</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(16,185,129,0.12);">🖼️</div>
+        <div class="tool-info"><div class="tool-name">Image to PDF</div><div class="tool-desc">Convert images to PDF</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(251,191,36,0.1);">🗑️</div>
+        <div class="tool-info"><div class="tool-name">Remove Pages</div><div class="tool-desc">Delete unnecessary pages</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(239,68,68,0.1);">🤖</div>
+        <div class="tool-info"><div class="tool-name">AI PDF Editor <span class="tool-new">NEW</span></div><div class="tool-desc">Edit with AI</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(168,85,247,0.12);">🎤</div>
+        <div class="tool-info"><div class="tool-name">Speech to Text</div><div class="tool-desc">Turn audio into text</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(109,40,217,0.15);">🔊</div>
+        <div class="tool-info"><div class="tool-name">Text to Speech</div><div class="tool-desc">Listen to documents</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(34,211,238,0.1);">📝</div>
+        <div class="tool-info"><div class="tool-name">Word to PDF</div><div class="tool-desc">Convert DOCX to PDF</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(16,185,129,0.12);">📊</div>
+        <div class="tool-info"><div class="tool-name">Excel to PDF</div><div class="tool-desc">Convert spreadsheets</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(251,191,36,0.1);">📋</div>
+        <div class="tool-info"><div class="tool-name">PDF to PPT</div><div class="tool-desc">Transform into slides</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(239,68,68,0.1);">📦</div>
+        <div class="tool-info"><div class="tool-name">Compress PDF</div><div class="tool-desc">Shrink file sizes</div></div>
+      </div>
+      <div class="tool-card" onclick="requireLogin()">
+        <div class="tool-icon" style="background:rgba(168,85,247,0.12);">✨</div>
+        <div class="tool-info"><div class="tool-name">Background Remover</div><div class="tool-desc">Erase backgrounds</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── TESTIMONIALS ── -->
+<section class="testimonials">
+  <div class="section-inner">
+    <div class="fade-up" style="text-align:center;margin-bottom:0;">
+      <div class="section-tag">What users say</div>
+      <h2 class="section-title">Teams Love DocShift</h2>
+    </div>
+    <div class="testimonials-grid fade-up">
+      <div class="testimonial">
+        <div class="stars">★★★★★</div>
+        <div class="testimonial-quote">DocShift's AI resume analyzer saved us hours every week. We process 50+ resumes daily and the chat feature lets us compare candidates instantly.</div>
+        <div class="testimonial-author">
+          <div class="t-avatar" style="background:rgba(109,40,217,0.3);border:1px solid rgba(168,85,247,0.3);">HR</div>
+          <div><div class="t-name">Priya Sharma</div><div class="t-role">HR Manager, Vertex Co.</div></div>
+        </div>
+      </div>
+      <div class="testimonial">
+        <div class="stars">★★★★★</div>
+        <div class="testimonial-quote">The PDF comparison tool is a game-changer for legal document review. Detects every change precisely and the export reports are professional-grade.</div>
+        <div class="testimonial-author">
+          <div class="t-avatar" style="background:rgba(34,211,238,0.15);border:1px solid rgba(34,211,238,0.3);color:var(--accent);">⚖️</div>
+          <div><div class="t-name">Rahul Mehta</div><div class="t-role">Legal Consultant</div></div>
+        </div>
+      </div>
+      <div class="testimonial">
+        <div class="stars">★★★★★</div>
+        <div class="testimonial-quote">I run a small content agency. DocShift's speech-to-text and text-to-speech tools let me deliver more to clients in half the time. Simply brilliant.</div>
+        <div class="testimonial-author">
+          <div class="t-avatar" style="background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#10b981;">✍️</div>
+          <div><div class="t-name">Anika Patel</div><div class="t-role">Content Agency Founder</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ── -->
+<section class="cta-section">
+  <div class="section-inner">
+    <div class="cta-card fade-up">
+      <div class="section-tag" style="justify-content:center;">Start Today</div>
+      <h2 class="section-title">Your Documents, Supercharged</h2>
+      <p class="section-desc">Join hundreds of teams already using DocShift to work smarter with documents.</p>
+      <div class="cta-buttons">
+        <a href="/login" class="btn-primary">Get Started Free →</a>
+        <a href="#demo" class="btn-ghost">Try the Demo</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <a href="#" class="footer-logo">≡ DocShift</a>
+  <p class="footer-copy">© 2025 DocShift. All rights reserved.</p>
+  <ul class="footer-links">
+    <li><a href="#">Privacy</a></li>
+    <li><a href="#">Terms</a></li>
+    <li><a href="/login">Login</a></li>
+  </ul>
+</footer>
+
+<!-- ── LOGIN HINT MODAL ── -->
+<div class="login-hint" id="login-hint">
+  <div style="position:relative;">
+    <button class="close-hint" onclick="closeLoginHint()">✕</button>
+    <div class="login-hint-card">
+      <div class="login-hint-icon">🔐</div>
+      <div class="login-hint-title">Login to Access</div>
+      <div class="login-hint-desc">This tool requires a DocShift account. Login to unlock all 12+ AI-powered document tools.</div>
+      <div class="login-hint-actions">
+        <a href="/login" class="btn-primary">Login →</a>
+        <button class="btn-ghost" onclick="closeLoginHint()">Maybe Later</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Tab switching
+  function switchTab(tab) {
+    document.querySelectorAll('.demo-tab').forEach((t,i) => {
+      const tabs = ['pdf-merge','word-count','ai-chat'];
+      t.classList.toggle('active', tabs[i] === tab);
+    });
+    document.querySelectorAll('.demo-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+  }
+
+  // Merge files handler
+  let mergeFileList = [];
+  function handleMergeFiles(e) {
+    mergeFileList = Array.from(e.target.files);
+    const drop = document.getElementById('merge-drop');
+    const btn = document.getElementById('merge-btn');
+    if (mergeFileList.length > 0) {
+      drop.innerHTML = `<div style="font-size:1.5rem;margin-bottom:0.6rem;">📄</div><div style="font-size:0.88rem;color:var(--text-muted);">${mergeFileList.length} file(s) selected:<br/><strong style="color:var(--purple-glow);">${mergeFileList.map(f=>f.name).join(', ')}</strong></div>`;
+      btn.disabled = false;
+    }
+  }
+
+  function runMergeDemo() {
+    if (mergeFileList.length === 0) return;
+    const out = document.getElementById('merge-output');
+    out.classList.add('loading');
+    out.innerHTML = '<div style="color:var(--text-muted);font-size:0.88rem;">Processing files…</div>';
+    setTimeout(() => {
+      out.classList.remove('loading');
+      const totalSize = mergeFileList.reduce((a,f) => a + f.size, 0);
+      const kb = (totalSize / 1024).toFixed(1);
+      out.innerHTML = `
+        <div class="demo-result-badge success">✓ Merge Successful</div>
+        <div style="font-size:0.9rem;line-height:1.8;">
+          <div>📄 <strong>Files merged:</strong> ${mergeFileList.length}</div>
+          <div>📦 <strong>Output name:</strong> ${document.getElementById('merge-output-name').value}</div>
+          <div>💾 <strong>Combined size:</strong> ~${kb} KB</div>
+          <div style="margin-top:1rem;padding:10px 14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:10px;font-size:0.82rem;color:#10b981;">
+            ✓ In the full app, this would download your merged PDF instantly and save it to your cloud storage.
+          </div>
+        </div>`;
+    }, 1800);
+  }
+
+  // Text Analysis
+  function runTextAnalysis() {
+    const text = document.getElementById('text-input').value.trim();
+    const out = document.getElementById('text-output');
+    if (!text) { out.innerHTML = '<div class="placeholder">Please paste some text first…</div>'; return; }
+    out.classList.add('loading');
+    out.innerHTML = '<div style="color:var(--text-muted);">Analyzing…</div>';
+    setTimeout(() => {
+      out.classList.remove('loading');
+      const words = text.split(/\s+/).filter(Boolean).length;
+      const chars = text.length;
+      const sentences = text.split(/[.!?]+/).filter(Boolean).length;
+      const paragraphs = text.split(/\n\n+/).filter(Boolean).length;
+      const readTime = Math.ceil(words / 200);
+      const uniqueWords = new Set(text.toLowerCase().match(/\b\w+\b/g) || []).size;
+      out.innerHTML = `
+        <div class="demo-result-badge success">✓ Analysis Complete</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;font-size:0.88rem;">
+          <div style="padding:10px;background:rgba(168,85,247,0.08);border-radius:10px;border:1px solid rgba(168,85,247,0.15);">
+            <div style="color:var(--text-muted);font-size:0.75rem;">WORDS</div>
+            <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:var(--purple-glow);">${words}</div>
+          </div>
+          <div style="padding:10px;background:rgba(34,211,238,0.06);border-radius:10px;border:1px solid rgba(34,211,238,0.12);">
+            <div style="color:var(--text-muted);font-size:0.75rem;">CHARACTERS</div>
+            <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:var(--accent);">${chars}</div>
+          </div>
+          <div style="padding:10px;background:rgba(16,185,129,0.06);border-radius:10px;border:1px solid rgba(16,185,129,0.12);">
+            <div style="color:var(--text-muted);font-size:0.75rem;">SENTENCES</div>
+            <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:#10b981;">${sentences}</div>
+          </div>
+          <div style="padding:10px;background:rgba(109,40,217,0.1);border-radius:10px;border:1px solid rgba(109,40,217,0.2);">
+            <div style="color:var(--text-muted);font-size:0.75rem;">READ TIME</div>
+            <div style="font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:var(--purple-bright);">${readTime} min</div>
+          </div>
+        </div>
+        <div style="margin-top:0.8rem;font-size:0.82rem;color:var(--text-muted);">Unique words: <strong style="color:var(--text);">${uniqueWords}</strong> · Paragraphs: <strong style="color:var(--text);">${paragraphs}</strong></div>`;
+    }, 900);
+  }
+
+  // Chat Demo
+  const chatResponses = {
+    merge: "DocShift can merge multiple PDFs into one in seconds! Just select your files, and the output is instantly ready for download. It also saves to your cloud storage automatically.",
+    split: "With Split PDF, you can extract specific pages or split at every page. Great for separating chapters or isolating sections from large documents.",
+    ai: "DocShift's AI PDF Editor lets you edit PDFs using plain English. Just describe what you want — 'remove the header from page 1' or 'make the font larger' — and the AI handles it.",
+    resume: "The AI Resume Analyzer extracts key info from any resume (PDF, DOCX, TXT) and gives you a detailed summary. You can also chat with it to compare multiple candidates!",
+    speech: "Speech to Text converts audio recordings to accurate transcripts. Text to Speech reads your documents aloud in natural voices — great for accessibility.",
+    compress: "PDF Compress reduces file sizes significantly without visible quality loss. Perfect for emailing large reports or uploading to portals with file limits.",
+    compare: "AI PDF Comparison detects every change between two document versions and generates a professional report. You can export it as PDF or DOCX.",
+    background: "Background Remover uses AI to cleanly erase image backgrounds. Upload any image and get a transparent-background version instantly.",
+    login: "You can login at /login. DocShift supports username/password authentication with role-based access — regular users and admin dashboard.",
+    default: "Great question! DocShift offers 12+ document tools powered by AI — from merging and splitting PDFs to AI-powered editing, resume analysis, speech processing, and more. What would you like to know more about?"
+  };
+
+  function sendChat() {
+    const input = document.getElementById('chat-input');
+    const messages = document.getElementById('chat-messages');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    // User message
+    messages.innerHTML += `<div class="chat-msg user"><div class="chat-avatar user">👤</div><div class="chat-bubble">${escapeHtml(text)}</div></div>`;
+
+    // Typing indicator
+    const typingId = 'typing-' + Date.now();
+    messages.innerHTML += `<div class="chat-msg ai" id="${typingId}"><div class="chat-avatar ai">🤖</div><div class="chat-bubble" style="color:rgba(200,180,230,0.4);">typing…</div></div>`;
+    messages.scrollTop = messages.scrollHeight;
+
+    // Determine response
+    const lc = text.toLowerCase();
+    let reply = chatResponses.default;
+    if (lc.includes('merge')) reply = chatResponses.merge;
+    else if (lc.includes('split')) reply = chatResponses.split;
+    else if (lc.includes('ai') || lc.includes('edit')) reply = chatResponses.ai;
+    else if (lc.includes('resume')) reply = chatResponses.resume;
+    else if (lc.includes('speech') || lc.includes('audio') || lc.includes('voice')) reply = chatResponses.speech;
+    else if (lc.includes('compress') || lc.includes('size')) reply = chatResponses.compress;
+    else if (lc.includes('compar')) reply = chatResponses.compare;
+    else if (lc.includes('background')) reply = chatResponses.background;
+    else if (lc.includes('login') || lc.includes('sign')) reply = chatResponses.login;
+
+    setTimeout(() => {
+      document.getElementById(typingId).remove();
+      messages.innerHTML += `<div class="chat-msg ai"><div class="chat-avatar ai">🤖</div><div class="chat-bubble">${reply}</div></div>`;
+      messages.scrollTop = messages.scrollHeight;
+    }, 900 + Math.random() * 600);
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // Login hint
+  function requireLogin() {
+    document.getElementById('login-hint').classList.add('open');
+  }
+  function closeLoginHint() {
+    document.getElementById('login-hint').classList.remove('open');
+  }
+  document.getElementById('login-hint').addEventListener('click', function(e) {
+    if (e.target === this) closeLoginHint();
+  });
+
+  // Intersection Observer for fade-up
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>

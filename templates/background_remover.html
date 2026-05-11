@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Background Remover - TARS DocShift</title>
+  <link rel="icon" href="/static/favicon.png" type="image/x-icon" />
+  <style>
+    :root {
+      --bg-main: #000000;
+      --navbar-bg: transparent;
+      --footer-bg: transparent;
+      --tool-radius: 20px;
+      --card-shadow: 0 4px 24px 0 rgba(40, 25, 67, 0.14);
+      --white: #fff;
+      --accent: #A259FF;
+      --accent-dark: #400457;
+      --btn-primary: #A259FF;
+      --btn-danger: #FF3939;
+      --btn-black: #000;
+      --btn-primary-hover: #c193ff;
+      --btn-black-hover: #353159;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      background: linear-gradient(180deg, #000000 0%, #31004A 70%, #610094 100%);
+      font-family: 'Inter', Arial, sans-serif;
+      color: var(--white);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    nav { background: var(--navbar-bg); height: 72px; display: flex; align-items: center; padding: 0 48px; box-sizing: border-box; z-index: 1000; }
+    .brand-logo { display: flex; align-items: center; height: 100%; margin-right: 21px; margin-top: 2px; }
+    .brand-logo img { height: 62px; width: 138px; object-fit: contain; border-radius: 10px; user-select: none; background: transparent; }
+    .nav-links { margin-left: auto; display: flex; align-items: center; gap: 1.7rem; }
+    .nav-links a, .dropdown-toggle { color: var(--white); font-weight: 600; text-decoration: none; font-size: 1.13rem; padding: 10px 18px 8px 18px; border-radius: 8px; background: none; border: none; outline: none; opacity: 0.93; transition: background 0.19s, color 0.18s, box-shadow 0.19s; }
+    .nav-links a.active, .nav-links a:hover, .dropdown-toggle:focus, .dropdown-toggle:hover { opacity: 1; color: var(--white); }
+    .logout-link { color: #ff4e54; font-weight: 600; border: 1.5px solid #ff4e54; background: none; border-radius: 8px; padding: 8px 18px; margin-left: 22px;}
+    .logout-link:hover { background: #28102b; color: #fff; }
+
+    /* User Profile Icon */
+    .user-profile { position: relative; display: inline-block; margin-left: 10px; }
+    .profile-icon { width: 55px; height: 55px; border-radius: 50%; cursor: pointer; transition: transform 0.2s ease, box-shadow 0.2s ease; object-fit: cover; }
+    .profile-icon:hover { transform: scale(1.05); box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2); }
+    .profile-dropdown { display: none; position: absolute; top: 45px; right: 0; width: 200px; height: 175px; background: #1B0039; opacity: 0.8; border-radius: 20px 0px 20px 20px; box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15); z-index: 9999; padding: 8px 0; visibility: hidden; transform: translateY(-10px); transition: opacity 0.3s ease, visibility 0.3s ease, transform 0.3s ease; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; }
+    .user-profile:hover .profile-dropdown { display: flex; opacity: 0.8; visibility: visible; transform: translateY(0); }
+    .profile-dropdown::before { content: ''; position: absolute; top: -8px; right: 12px; width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 8px solid #1B0039; }
+    .profile-dropdown-item { display: flex; align-items: center; padding: 12px 16px; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 500; transition: background-color 0.2s ease; border-bottom: 1px solid rgba(255, 255, 255, 0.1); flex: 0 1 auto; min-width: 120px; margin: 4px; border-radius: 8px; justify-content: flex-start; text-align: left; }
+    .profile-dropdown-item:last-child { border-bottom: none; }
+    .profile-dropdown-item:hover { background-color: rgba(255, 255, 255, 0.1); }
+    .profile-dropdown-item.logout:hover { background-color: rgba(255, 107, 107, 0.1); }
+    .dropdown { position: relative; display: inline-block; }
+    .dropdown-toggle::after { content: '▼'; margin-left: 7px; font-size: 0.83em; color: var(--white);}
+    .dropdown:focus-within .dropdown-toggle::after, .dropdown:hover .dropdown-toggle::after { transform: rotate(180deg);}
+    .dropdown-content { display:none; position:absolute; top:58px; left:-120px; background:#fff; box-shadow:0 14px 42px 0 rgba(40,25,67,0.22),0 2px 12px 0 rgba(40,25,67,0.12); border-radius:17px; z-index:9999; padding:15px 26px 11px 17px; min-width:410px; max-width:540px; grid-template-columns:repeat(2,1fr); gap:9px 11px; }
+    .dropdown:focus-within .dropdown-content, .dropdown:hover .dropdown-content{ display:grid; opacity:1; visibility:visible; pointer-events:all;}
+    .dropdown-content a { color:#14131c; font-weight:600; background:#fff; padding:11px 20px 9px 13px; border-radius:10px; font-size:1rem; transition:background 0.13s, color 0.11s, box-shadow 0.19s; text-align:left;}
+    .dropdown-content a:hover, .dropdown-content a:focus { background:#dedcff; color:#21003b;}
+    @media (max-width:950px){ nav{padding:0 13px;}.brand-logo img{height:48px;width:98px;}.nav-links{gap:1rem;}.dropdown-content{min-width:240px; padding:11px 6px 8px 7px;} }
+    @media (max-width:680px){ nav{flex-direction:column;height:auto; padding:0 0 7px 0;}.brand-logo{margin:5px 0 4px 0;}.nav-links{width:100%; gap:7px;justify-content:flex-start;} }
+
+    /* --- Card / Tool Layout --- */
+    .bgremover-outer { min-height: calc(100vh - 100px); display:flex; align-items:center; justify-content:center; margin:0; padding:0; }
+    .bgremover-card {
+      background: #fff;
+      border-radius: 22px;
+      box-shadow: var(--card-shadow);
+      display: flex;
+      align-items: center;
+      max-width: 950px;
+      min-width: 375px;
+      width: 90%;
+      padding: 42px 36px 45px 46px;
+      gap: 58px;
+      margin: 50px auto;
+    }
+    .bgremover-left {
+      flex: 1 1 370px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      min-width: 280px;
+    }
+    .bgremover-left h1 {
+      font-size: 2.25rem;
+      font-weight: 700;
+      color: #1A0326;
+      margin: 0 0 18px 0;
+    }
+    .bgremover-actions {
+      display: flex;
+      gap: 13px;
+      margin-bottom: 18px;
+      width: 100%;
+      flex-wrap: wrap;
+    }
+    .custom-file-upload {
+      background-color: #20002C;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 13px 28px;
+      border: none;
+      border-radius: 9px;
+      box-shadow: 0 2px 8px rgba(98, 0, 148, 0.09);
+      cursor: pointer;
+      letter-spacing: .01em;
+      outline: none;
+      display: inline-block;
+      transition: background 0.17s;
+    }
+    .custom-file-upload:hover { background: #400457; }
+    input[type="file"] { display: none; }
+    .remove-background-btn {
+      background: var(--btn-primary);
+      color: #fff;
+      font-weight: 600;
+      border: none;
+      border-radius: 9px;
+      font-size: 1rem;
+      padding: 13px 28px;
+      cursor: pointer;
+      transition: background 0.19s;
+      box-shadow: 0 2px 8px rgba(162,89,255,0.15);
+    }
+    .remove-background-btn:hover { background: var(--btn-primary-hover);}
+    .remove-background-btn:disabled { background: #cccccc; cursor: not-allowed; }
+    .preview-btn {
+      background: var(--btn-black);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 13px 27px;
+      cursor: pointer;
+      transition: background 0.16s;
+    }
+    .preview-btn:hover { background: var(--btn-black-hover);}
+    .preview-btn:disabled { background: #cccccc; cursor: not-allowed; }
+    .download-btn {
+      background: var(--btn-primary);
+      color: #fff;
+      border: none;
+      border-radius: 9px;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 13px 27px;
+      cursor: pointer;
+      transition: background 0.16s;
+      display: none;
+    }
+    .download-btn:hover { background: var(--btn-primary-hover);}
+    .download-btn:disabled { background: #cccccc; cursor: not-allowed; }
+    .download-btn.active { display: inline-block; }
+    .file-display {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+      margin-bottom: 12px;
+      font-size: 0.97em;
+      color: #6900ac;
+      min-height: 1.3em;
+    }
+    .remove-btn {
+      background-color: #ff3333;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 0.87em;
+      transition: background-color 0.2s;
+    }
+    .remove-btn:hover { background-color: #b6002c; }
+    #statusMessage {
+      margin-top: 16px;
+      font-weight: bold;
+      font-size: 1.07em;
+      min-height: 1.4em;
+      color: #47455A;
+    }
+    #statusMessage.success {
+      color: #28a745;
+    }
+    #statusMessage.error {
+      color: #dc3545;
+    }
+    .bgremover-right {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 180px;
+      margin: 0 5px 0 0;
+    }
+    .bgremover-right img {
+      width: 200px; height: 188px; display: block; border-radius: 17px; background: transparent; box-shadow: none; object-fit: contain;
+    }
+
+    /* --- Preview Modal --- */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.8);
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal.active {
+      display: flex;
+    }
+    .modal-content {
+      background-color: #fff;
+      padding: 30px;
+      border-radius: 15px;
+      max-width: 90%;
+      max-height: 90vh;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.3);
+    }
+    .modal-header {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #1A0326;
+      width: 100%;
+      text-align: center;
+    }
+    .modal-image-container {
+      display: flex;
+      gap: 30px;
+      align-items: flex-start;
+      justify-content: center;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+    .image-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .image-wrapper label {
+      font-weight: 600;
+      color: #1A0326;
+      font-size: 0.95rem;
+    }
+    .modal-image {
+      max-width: 400px;
+      max-height: 400px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      object-fit: contain;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 15px;
+      width: 100%;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    .modal-action-btn {
+      background: var(--btn-primary);
+      color: #fff;
+      font-weight: 600;
+      border: none;
+      border-radius: 9px;
+      font-size: 1rem;
+      padding: 13px 27px;
+      cursor: pointer;
+      transition: background 0.16s;
+      min-width: 140px;
+    }
+    .modal-action-btn:hover {
+      background: var(--btn-primary-hover);
+    }
+    .modal-action-btn.close-btn {
+      background: var(--btn-black);
+    }
+    .modal-action-btn.close-btn:hover {
+      background: var(--btn-black-hover);
+    }
+    .modal-action-btn.download-btn {
+      background: #28a745;
+    }
+    .modal-action-btn.download-btn:hover {
+      background: #228c3d;
+    }
+
+    @media (max-width: 880px) {
+      .bgremover-card { flex-direction: column; gap: 25px; padding: 24px 2vw 25px 2vw;}
+      .bgremover-right { margin: 28px auto 0 auto;}
+      .bgremover-left { align-items: center; text-align: center;}
+      .bgremover-left h1 { text-align: center;}
+      .modal-image-container {
+        flex-direction: column;
+      }
+      .modal-image {
+        max-width: 300px;
+        max-height: 300px;
+      }
+    }
+    footer {
+      text-align: center;
+      padding: 18px 0 8px 0;
+      background: var(--footer-bg);
+      color: #e0e0e0;
+      font-size: 0.95em;
+      margin-top: auto;
+      box-shadow: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- ✦ NAVIGATION BAR ✦ -->
+  <nav>
+    <div class="brand-logo">
+      <img src="/static/logo.png" alt="DocShift Logo" draggable="false" />
+    </div>
+    <div class="nav-links" role="menubar" aria-label="Primary navigation">
+      <a href="/" class="active" role="menuitem" tabindex="0">Home</a>
+      <div class="dropdown" tabindex="0" role="menuitem" aria-haspopup="true" aria-expanded="false">
+        <a href="#" class="dropdown-toggle" aria-haspopup="true" aria-expanded="false">All Tools</a>
+        <div class="dropdown-content" role="menu" aria-label="All Tools">
+          <a href="/merge-pdfs" role="menuitem" tabindex="-1">Merge PDFs</a>
+          <a href="/image-to-pdf" role="menuitem" tabindex="-1">Image to PDF</a>
+          <a href="/split-pdf" role="menuitem" tabindex="-1">Split PDF</a>
+          <a href="/remove-pages-ui" role="menuitem" tabindex="-1">Remove Pages</a>
+          <a href="/ai-pdf-editor" role="menuitem" tabindex="-1">AI PDF Editor</a>
+          <a href="/ai_resume_analyzer" role="menuitem" tabindex="-1">AI Resume Analyzer</a>
+          <a href="/ai_table_converter" role="menuitem" tabindex="-1">AI Table Converter</a>
+          <a href="/document-screener" role="menuitem" tabindex="-1">Document Screener</a>
+          <a href="/plagiarism-scanner" role="menuitem" tabindex="-1">Plagiarism Scanner</a>
+          <a href="/text-summarizer" role="menuitem" tabindex="-1">Summarize Text</a>
+          <a href="/speech-to-text" role="menuitem" tabindex="-1">Speech to Text</a>
+          <a href="/text-to-speech" role="menuitem" tabindex="-1">Text to Speech</a>
+          <a href="/pdf-to-image" role="menuitem" tabindex="-1">PDF to Image</a>
+          <a href="/word-to-pdf" role="menuitem" tabindex="-1">Word to PDF</a>
+          <a href="/excel-to-pdf" role="menuitem" tabindex="-1">Excel to PDF</a>
+          <a href="/pdf-to-ppt" role="menuitem" tabindex="-1">PDF to PPT</a>
+          <a href="/bg-remover" role="menuitem" tabindex="-1">Background Remover</a>
+          <a href="/compress-pdf" role="menuitem" tabindex="-1">Compress PDF</a>
+        </div>
+      </div>
+      <a href="/history" role="menuitem" tabindex="0">History</a>
+      
+      <!-- User Profile Dropdown -->
+      <div class="user-profile">
+        <img src="{{ user.profile_picture or '/static/user-profile.png' }}" alt="User Profile" class="profile-icon" draggable="false" />
+        <div class="profile-dropdown">
+          <a href="/profile" class="profile-dropdown-item">My Profile</a>
+          <a href="/settings" class="profile-dropdown-item">Settings</a>
+          <a href="/help" class="profile-dropdown-item">Help & Support</a>
+          <a href="/logout" class="profile-dropdown-item logout">Logout</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ===================== MAIN CONTENT ====================== -->
+  <div class="bgremover-outer">
+    <div class="bgremover-card">
+      <div class="bgremover-left">
+        <h1>Background Remover</h1>
+        <form id="bgRemoverForm" enctype="multipart/form-data" style="width:100%">
+          <div class="bgremover-actions">
+            <label for="fileInput" class="custom-file-upload">Choose File</label>
+            <input type="file" id="fileInput" name="image" accept="image/*" />
+            <button type="button" id="removeBgBtn" class="remove-background-btn">Remove Background</button>
+          </div>
+          <div class="file-display" id="fileDisplay" style="display: none;">
+            <span id="fileName"></span>
+            <button type="button" class="remove-btn" id="removeFile">Remove</button>
+          </div>
+        </form>
+        <div id="statusMessage"></div>
+        <!-- Download button - shown after processing -->
+        <div class="download-section" id="downloadSection" style="display: none; margin-top: 20px;">
+          <button type="button" id="directDownloadBtn" class="download-btn" style="display: inline-block; margin-right: 10px;">Download Image</button>
+          <button type="button" id="previewBtn" class="preview-btn">Preview</button>
+        </div>
+      </div>
+      <div class="bgremover-right">
+        <img src="/static/Frame16.png" alt="background remover icon" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== PREVIEW MODAL ====================== -->
+  <div id="previewModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">Preview Result</div>
+      <div class="modal-image-container">
+        <div class="image-wrapper">
+          <label>Original Image</label>
+          <img id="originalImage" class="modal-image" alt="Original Image" />
+        </div>
+        <div class="image-wrapper">
+          <label>Processed Image</label>
+          <img id="processedImage" class="modal-image" alt="Processed Image" />
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="modal-action-btn download-btn" id="modalDownloadBtn">Download</button>
+        <button type="button" class="modal-action-btn close-btn" id="modalCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    © 2025 TARS DocShift. All rights reserved.
+  </footer>
+
+  <script>
+    let processedImageUrl = null;
+    let downloadUrl = null;
+    let originalImageUrl = null;
+
+    function setStatus(message, type = 'default') {
+      const status = document.getElementById('statusMessage');
+      if (!status) return;
+      status.textContent = message;
+      status.className = type; // 'error', 'success', or 'default'
+    }
+
+    function updateFileDisplay() {
+      const fileInput = document.getElementById('fileInput');
+      const fileDisplay = document.getElementById('fileDisplay');
+      const fileNameSpan = document.getElementById('fileName');
+
+      if (!fileInput || !fileDisplay || !fileNameSpan) return;
+
+      if (fileInput.files.length > 0) {
+        fileNameSpan.textContent = fileInput.files[0].name;
+        fileDisplay.style.display = 'flex';
+      } else {
+        fileNameSpan.textContent = '';
+        fileDisplay.style.display = 'none';
+      }
+    }
+
+    function removeFile() {
+      const fileInput = document.getElementById('fileInput');
+      if (!fileInput) return;
+      fileInput.value = '';
+      updateFileDisplay();
+      setStatus('', 'default');
+      processedImageUrl = null;
+      downloadUrl = null;
+      originalImageUrl = null;
+      
+      // Hide download section
+      const downloadSection = document.getElementById('downloadSection');
+      if (downloadSection) {
+        downloadSection.style.display = 'none';
+      }
+    }
+
+    async function removeBackground() {
+      const fileInput = document.getElementById('fileInput');
+      const removeBgButton = document.getElementById('removeBgBtn');
+
+      if (!fileInput.files.length) {
+        setStatus('Please select an image.', 'error');
+        return;
+      }
+
+      const file = fileInput.files[0];
+      const validImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/webp'];
+      if (!validImageTypes.includes(file.type)) {
+        setStatus('Please select a valid image (JPG, PNG, GIF, BMP, TIFF, WEBP).', 'error');
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        setStatus('File size exceeds 10MB limit.', 'error');
+        return;
+      }
+
+      // Store original image URL for preview
+      originalImageUrl = URL.createObjectURL(file);
+
+      const form = document.getElementById('bgRemoverForm');
+      const formData = new FormData(form);
+
+      try {
+        setStatus('Processing...', 'default');
+        removeBgButton.disabled = true;
+        removeBgButton.textContent = 'Processing...';
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+        const response = await fetch('/remove_background', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Unknown error');
+        }
+
+        const data = await response.json();
+        
+        if (data.success && data.download_url) {
+          downloadUrl = data.download_url;
+          // Fetch the processed image for preview
+          const imgResponse = await fetch(downloadUrl);
+          const blob = await imgResponse.blob();
+          processedImageUrl = URL.createObjectURL(blob);
+
+          setStatus('Background removed successfully!', 'success');
+          
+          // Show download section with both Direct Download and Preview buttons
+          const downloadSection = document.getElementById('downloadSection');
+          if (downloadSection) {
+            downloadSection.style.display = 'block';
+          }
+        } else {
+          throw new Error(data.error || 'Unknown error from server');
+        }
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          setStatus('Request timed out after 30 seconds. The image might be too large or the server is busy.', 'error');
+        } else {
+          setStatus('Background removal failed: ' + err.message, 'error');
+        }
+      } finally {
+        removeBgButton.disabled = false;
+        removeBgButton.textContent = 'Remove Background';
+      }
+    }
+
+    function showPreviewModal() {
+      const modal = document.getElementById('previewModal');
+      const originalImg = document.getElementById('originalImage');
+      const processedImg = document.getElementById('processedImage');
+
+      if (originalImageUrl) {
+        originalImg.src = originalImageUrl;
+      }
+      if (processedImageUrl) {
+        processedImg.src = processedImageUrl;
+      }
+
+      modal.classList.add('active');
+    }
+
+    function closePreviewModal() {
+      const modal = document.getElementById('previewModal');
+      modal.classList.remove('active');
+    }
+
+    function downloadProcessedImage() {
+      if (!downloadUrl) {
+        setStatus('No processed image available for download.', 'error');
+        return;
+      }
+
+      // Create a temporary anchor element and trigger download
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = 'background_removed.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      closePreviewModal();
+      removeFile();
+      setStatus('Image downloaded successfully!', 'success');
+    }
+
+    // Event listeners
+    document.addEventListener('DOMContentLoaded', function() {
+      const fileInput = document.getElementById('fileInput');
+      const removeButton = document.getElementById('removeFile');
+      const removeBgButton = document.getElementById('removeBgBtn');
+      const modalCloseBtn = document.getElementById('modalCloseBtn');
+      const modalDownloadBtn = document.getElementById('modalDownloadBtn');
+      const modal = document.getElementById('previewModal');
+
+      if (fileInput) {
+        fileInput.addEventListener('change', updateFileDisplay);
+      }
+
+      if (removeButton) {
+        removeButton.addEventListener('click', removeFile);
+      }
+
+      if (removeBgButton) {
+        removeBgButton.addEventListener('click', removeBackground);
+      }
+
+      if (modalCloseBtn) {
+        modalCloseBtn.addEventListener('click', closePreviewModal);
+      }
+
+      if (modalDownloadBtn) {
+        modalDownloadBtn.addEventListener('click', downloadProcessedImage);
+      }
+
+      // Direct download button in main card
+      const directDownloadBtn = document.getElementById('directDownloadBtn');
+      if (directDownloadBtn) {
+        directDownloadBtn.addEventListener('click', downloadProcessedImage);
+      }
+
+      // Preview button in main card
+      const previewBtn = document.getElementById('previewBtn');
+      if (previewBtn) {
+        previewBtn.addEventListener('click', showPreviewModal);
+      }
+
+      // Close modal when clicking outside of it
+      if (modal) {
+        modal.addEventListener('click', function(e) {
+          if (e.target === modal) {
+            closePreviewModal();
+          }
+        });
+      }
+    });
+  </script>
+  <script src="/static/logout-confirm.js"></script>
+</body>
+</html>

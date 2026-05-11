@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register Company - DocShift</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="icon" href="/static/favicon.png" type="image/x-icon" />
+    <style>
+        :root {
+            --bg-main: #000000;
+            --tool-gradient: linear-gradient(-53deg, #31004A, #14033D);
+            --tool-radius: 20px;
+            --card-shadow: 0 4px 24px 0 rgba(40, 25, 67, 0.14);
+            --tool-shadow-hover: 0 8px 38px 0 rgba(40, 25, 67, 0.34);
+            --white: #fff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background: linear-gradient(180deg, #000000 0%, #31004A 70%, #610094 100%);
+            font-family: 'Inter', Arial, sans-serif;
+            color: var(--white);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .logo-container {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-container img {
+            height: 80px;
+            width: auto;
+            object-fit: contain;
+        }
+
+        .container {
+            padding: 40px 35px;
+            max-width: 1057px;
+            width: 100%;
+            border-radius: var(--tool-radius);
+            box-shadow: var(--card-shadow);
+            transition: box-shadow 0.3s ease;
+            border: 2px solid white;
+        }
+
+        .container:hover {
+            box-shadow: var(--tool-shadow-hover);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--white);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 20px;
+        }
+
+        .form-column {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--white);
+            font-size: 14px;
+        }
+
+        input[type="text"], input[type="email"], input[type="password"], input[type="tel"] {
+            width: 100%;
+            padding: 14px 16px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--white);
+            font-size: 15px;
+            font-family: 'Inter', Arial, sans-serif;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        input[type="text"]:focus, 
+        input[type="email"]:focus, 
+        input[type="password"]:focus, 
+        input[type="tel"]:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.4);
+            background-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+        }
+
+        input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #610094, #31004A);
+            border: none;
+            border-radius: 10px;
+            color: var(--white);
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+            font-family: 'Inter', Arial, sans-serif;
+        }
+
+        button:hover {
+            background: linear-gradient(135deg, #7a00b8, #3d0058);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(97, 0, 148, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .error-message {
+            color: #ff6b81;
+            margin-top: 15px;
+            font-weight: 600;
+            text-align: center;
+            padding: 12px;
+            background-color: rgba(255, 107, 129, 0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 107, 129, 0.3);
+        }
+
+        .footer-text {
+            text-align: center;
+            margin-top: 30px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+                gap: 0;
+            }
+            
+            .container {
+                max-width: 500px;
+                padding: 30px 25px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="logo-container">
+        <img src="/static/logo.png" alt="DocShift Logo">
+    </div>
+    <div class="container">
+        <h1>Register Company</h1>
+        <form id="companyForm" method="POST" action="/register-company">
+            <div class="form-grid">
+                <div class="form-column">
+                    <div class="form-group">
+                        <label for="company_name">Company's Name</label>
+                        <input type="text" name="company_name" id="company_name" placeholder="Enter company name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="owner_name">Owner's Name</label>
+                        <input type="text" name="owner_name" id="owner_name" placeholder="Enter owner's name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="email">E-mail ID</label>
+                        <input type="email" name="email" id="email" placeholder="Enter email ID" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="phone">Phone Number</label>
+                        <input type="tel" name="phone" id="phone" placeholder="Enter phone number" required>
+                    </div>
+                </div>
+                <div class="form-column">
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" name="username" id="username" placeholder="Enter username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" name="password" id="password" placeholder="Enter password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="confirm_password">Confirm Password</label>
+                        <input type="password" name="confirm_password" id="confirm_password" placeholder="Re-enter password" required>
+                    </div>
+                </div>
+            </div>
+            <button type="submit">Register Company</button>
+        </form>
+        {% if error %}
+            <div class="error-message">{{ error }}</div>
+        {% endif %}
+    </div>
+    <div class="footer-text">
+        © 2025 DocShift. All rights reserved.
+    </div>
+
+    <!-- Import Auto-Save Library -->
+    <script src="/static/auto-save.js"></script>
+    
+    <script>
+        /**
+         * Auto-Save Implementation for Company Registration Form
+         * Provides Google Forms-like behavior:
+         * - Auto-saves form data to localStorage while user types
+         * - Restores data on page refresh
+         * - Clears data after successful submission
+         */
+
+        let autoSave = null;
+        const FORM_ID = 'companyForm';
+        const SAVE_NAME = 'register_company_form';
+
+        // Initialize auto-save when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize AutoSave instance
+            autoSave = new AutoSave(FORM_ID, SAVE_NAME, {
+                debounceDelay: 1500, // Save every 1.5 seconds of inactivity
+                storageType: 'localStorage', // Persists even after browser close
+                showIndicator: true,
+                onSave: function(data) {
+                    // Called when form data is saved
+                    console.log('✓ Form draft saved', data);
+                },
+                onRestore: function(data) {
+                    // Called when form data is restored from storage
+                    console.log('✓ Previous form data restored', data);
+                    showRestoreNotification();
+                }
+            });
+
+            // Attach form submission handler
+            const form = document.getElementById(FORM_ID);
+            if (form) {
+                form.addEventListener('submit', handleFormSubmit);
+            }
+
+            // Optional: Show notification if data was restored
+            if (autoSave.hasSavedData()) {
+                const lastSaveTime = autoSave.getLastSaveTime();
+                console.log(`Restored from auto-save (${formatTime(lastSaveTime)})`);
+            }
+        });
+
+        /**
+         * Handle form submission
+         * - Clear auto-save data after successful submission
+         * - Let the form submit to the backend
+         */
+        function handleFormSubmit(e) {
+            // Note: Form still submits normally via POST
+            // Auto-save data will be cleared after successful server response
+            // This is handled by letting the form redirect or reload
+            
+            // If you need async submission, modify this:
+            // e.preventDefault();
+            // ... submit via fetch ...
+            // Then call: autoSave.clearSavedData();
+        }
+
+        /**
+         * Show a subtle text notification that data was restored from auto-save
+         */
+        function showRestoreNotification() {
+            const notification = document.createElement('div');
+            notification.textContent = 'Data restored successfully.';
+            notification.style.cssText = `
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                padding: 12px 20px;
+                background-color: rgba(31, 41, 55, 0.95);
+                color: #f3f4f6;
+                border-radius: 6px;
+                font-size: 13px;
+                font-family: 'Inter', Arial, sans-serif;
+                font-weight: 500;
+                z-index: 9999;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+                pointer-events: none;
+            `;
+
+            document.body.appendChild(notification);
+            
+            // Fade in
+            setTimeout(() => {
+                notification.style.opacity = '1';
+            }, 10);
+            
+            // Fade out and remove after 2 seconds
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => notification.remove(), 300);
+            }, 2000);
+        }
+
+        /**
+         * Format ISO timestamp to readable time
+         */
+        function formatTime(isoString) {
+            if (!isoString) return '';
+            const date = new Date(isoString);
+            return date.toLocaleTimeString();
+        }
+
+        /**
+         * Optional: Clear auto-save when user clicks a "Clear Form" button
+         * (Add this if you have a clear/reset button)
+         */
+        function clearFormAndAutoSave() {
+            if (autoSave) {
+                autoSave.clearSavedData();
+            }
+            document.getElementById(FORM_ID).reset();
+        }
+
+        /**
+         * Manual save trigger (useful for debugging or explicit save button)
+         * (Call this if you want to expose it to the UI)
+         */
+        function manualSave() {
+            if (autoSave) {
+                autoSave.manualSave();
+            }
+        }
+
+        /**
+         * Clean up on page unload (destroy auto-save listener)
+         */
+        window.addEventListener('beforeunload', function() {
+            if (autoSave) {
+                autoSave.destroy();
+            }
+        });
+    </script>
+    <script src="/static/logout-confirm.js"></script>
+</body>
+</html>

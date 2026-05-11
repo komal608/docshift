@@ -1915,9 +1915,14 @@ def static_files(filename):
 def assests_files(filename):
     return send_from_directory('assests', filename)
 
+@app.route('/homepage')
+def homepage():
+    return render_template('homepage.html')
+
 @app.route('/')
-@login_required
 def index():
+    if 'logged_in' not in session:
+        return redirect(url_for('homepage'))
     return render_template('index.html', **get_user_context())
 
 @app.route('/help')

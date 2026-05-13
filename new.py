@@ -5942,15 +5942,15 @@ def download_comparison_docx():
 
 
 # ==================== ADMIN DASHBOARD ENDPOINTS ====================
-
+init_db()  # Initialize DB once on startup
+update_users_table()  # Update users table schema
 # --- Run Flask App ---
 
 if __name__ == '__main__':
-    init_db()  # Initialize DB once on startup
-    update_users_table()  # Update users table schema
+    
     print("🚀 Starting DocShift on 127.0.0.1:5000")
     print("� Email verification enabled")
     print("📱 Phone/SMS verification DISABLED")
     print("🔥 Firebase SMS functionality has been removed")
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 8080))
     app.run(debug=False, host='0.0.0.0', port=port)

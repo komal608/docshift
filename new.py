@@ -52,14 +52,13 @@ from werkzeug.utils import secure_filename
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
-from rembg import remove
+
 from gtts import gTTS
 import speech_recognition as sr
 from pydub import AudioSegment
 from bs4 import BeautifulSoup
 from fpdf import FPDF
-import pytesseract
-from pdf2image import convert_from_bytes
+
 
 # --- Flask & Environment Setup ---
 
@@ -119,6 +118,8 @@ def login_required(f):
 
 # --- AI Resume Analyzer Utilities ---
 def extract_text_from_file(file_storage):
+    import pytesseract
+    from pdf2image import convert_from_bytes
     """Extract text from uploaded file (PDF, DOCX, TXT, etc.) with OCR fallback for image-based PDFs."""
     filename = file_storage.filename.lower()
     ext = os.path.splitext(filename)[1]
@@ -3248,6 +3249,7 @@ def download_ppt():
 @app.route('/remove_background', methods=['POST'])
 @login_required
 def remove_background():
+    from rembg import remove
     logger.debug("Received request at /remove_background")
     if 'image' not in request.files:
         logger.error("No image uploaded")

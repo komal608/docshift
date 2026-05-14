@@ -2705,52 +2705,61 @@ def convert_word_to_pdf():
                 if not os.path.exists(output_path):
                     raise Exception("docx2pdf did not create output file.")
             except Exception as e:
-                logger.error(f'docx2pdf failed: {e}, falling back to text pdf conversion.')
-                # Use python-docx fallback
-                doc = Document(input_path)
-                text = []
+                logger.error(f'docx2pdf failed: {e}, falling back to Platypus PDF conversion.')
+                # --- Platypus fallback: full content, proper wrapping, tables ---
+                from reportlab.lib.units import cm as _cm
 
-                # Extract paragraphs
-                for para in doc.paragraphs:
-                    if para.text.strip():
-                        text.append(para.text)
+                def _safe(txt):
+                    return txt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').translate(
+                        {i: '?' for i in range(65536, 1114112)})
 
-                # Extract tables
-                for table in doc.tables:
-                    for row in table.rows:
-                        row_text = ' | '.join(cell.text.strip() for cell in row.cells)
-                        if row_text.strip():
-                            text.append(row_text)
+                _styles = getSampleStyleSheet()
+                _normal = ParagraphStyle('_N', parent=_styles['Normal'], fontSize=11, leading=15, spaceAfter=5)
+                _h1 = ParagraphStyle('_H1', parent=_styles['Normal'], fontSize=14, leading=18, spaceBefore=10, spaceAfter=6, fontName='Helvetica-Bold')
+                _h2 = ParagraphStyle('_H2', parent=_styles['Normal'], fontSize=12, leading=16, spaceBefore=8, spaceAfter=4, fontName='Helvetica-Bold')
 
-                if not text:
-                    raise Exception("No text found in docx for fallback conversion.")
+                doc_in = Document(input_path)
+                story = []
+
+                for para in doc_in.paragraphs:
+                    raw = para.text
+                    if not raw.strip():
+                        story.append(Spacer(1, 4))
+                        continue
+                    sname = para.style.name if para.style else ''
+                    if 'Heading 1' in sname or 'Title' in sname:
+                        story.append(Paragraph(_safe(raw), _h1))
+                    elif 'Heading' in sname:
+                        story.append(Paragraph(_safe(raw), _h2))
+                    else:
+                        story.append(Paragraph(_safe(raw), _normal))
+
+                for tbl in doc_in.tables:
+                    tdata = []
+                    for row in tbl.rows:
+                        tdata.append([Paragraph(_safe(c.text.strip()), _normal) for c in row.cells])
+                    if tdata:
+                        ncols = max(len(r) for r in tdata)
+                        cw = (A4[0] - 4 * _cm) / max(ncols, 1)
+                        t = Table(tdata, colWidths=[cw] * ncols)
+                        t.setStyle(TableStyle([
+                            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                            ('FONTSIZE', (0, 0), (-1, -1), 10),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+                            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+                        ]))
+                        story.append(t)
+                        story.append(Spacer(1, 8))
+
+                if not story:
+                    raise Exception("No content found in docx for fallback conversion.")
 
                 pdf_io = io.BytesIO()
-                c = canvas.Canvas(pdf_io, pagesize=letter)
-
-                width, height = letter
-                margin = 50
-                line_height = 14
-                y = height - margin
-
-                for line in text:
-                    if y < margin:
-                        c.showPage()
-                        y = height - margin
-
-                    max_chars = int((width - 2 * margin) / 7)
-                    if len(line) > max_chars:
-                        line = line[:max_chars] + "..."
-
-                    try:
-                        c.drawString(margin, y, line)
-                    except:
-                        clean_line = ''.join(char for char in line if ord(char) < 128)
-                        c.drawString(margin, y, clean_line)
-
-                    y -= line_height
-
-                c.save()
+                SimpleDocTemplate(pdf_io, pagesize=A4,
+                                  leftMargin=2*_cm, rightMargin=2*_cm,
+                                  topMargin=2*_cm, bottomMargin=2*_cm).build(story)
                 pdf_io.seek(0)
                 with open(output_path, 'wb') as f:
                     f.write(pdf_io.getvalue())
@@ -2788,31 +2797,22 @@ def convert_word_to_pdf():
                     return jsonify({'error': 'Failed to read .doc file. Please try converting to .docx format first.'}), 500
 
             pdf_io = io.BytesIO()
-            c = canvas.Canvas(pdf_io, pagesize=letter)
+            from reportlab.lib.units import cm as _cm2
 
-            width, height = letter
-            margin = 50
-            line_height = 14
-            y = height - margin
+            def _safe2(txt):
+                return txt.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').translate(
+                    {i: '?' for i in range(65536, 1114112)})
 
-            for line in text:
-                if y < margin:
-                    c.showPage()
-                    y = height - margin
+            _st = getSampleStyleSheet()
+            _np = ParagraphStyle('_NP', parent=_st['Normal'], fontSize=11, leading=15, spaceAfter=5)
+            story2 = [Paragraph(_safe2(ln.strip()), _np) for ln in text if ln.strip()]
 
-                max_chars = int((width - 2 * margin) / 7)
-                if len(line) > max_chars:
-                    line = line[:max_chars] + "..."
+            if not story2:
+                raise Exception("No content found in .doc file for PDF conversion.")
 
-                try:
-                    c.drawString(margin, y, line)
-                except:
-                    clean_line = ''.join(char for char in line if ord(char) < 128)
-                    c.drawString(margin, y, clean_line)
-
-                y -= line_height
-
-            c.save()
+            SimpleDocTemplate(pdf_io, pagesize=A4,
+                              leftMargin=2*_cm2, rightMargin=2*_cm2,
+                              topMargin=2*_cm2, bottomMargin=2*_cm2).build(story2)
             pdf_io.seek(0)
             with open(output_path, 'wb') as f:
                 f.write(pdf_io.getvalue())
@@ -3135,55 +3135,155 @@ def convert_pdf_to_ppt():
     file = request.files['file']
     if not file.filename.endswith('.pdf'):
         return jsonify({'error': 'Only .pdf files are supported'}), 400
-    
+
     original_filename = file.filename
     ppt_id = uuid.uuid4().hex
     temp_dir = os.path.join(tempfile.gettempdir(), 'docshift_ppt')
     os.makedirs(temp_dir, exist_ok=True)
     output_path = os.path.join(temp_dir, f'{ppt_id}.pptx')
-    
+
     try:
-        pdf_reader = PdfReader(file.stream)
+        from pptx.dml.color import RGBColor
+        from pptx.util import Emu
+
+        file.stream.seek(0)
+        pdf_bytes = file.stream.read()
+        pdf_doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+
         prs = Presentation()
-        slide_layout = prs.slide_layouts[1]  # Title and Content slide
-        for page_num in range(len(pdf_reader.pages)):
-            page = pdf_reader.pages[page_num]
-            text = page.extract_text() or f"Page {page_num + 1}"
-            lines = text.split('\n')
-            filtered_lines = [line.strip() for line in lines if line.strip()]
-            slide_text = '\n'.join(filtered_lines[:10])
-            slide = prs.slides.add_slide(slide_layout)
-            title_shape = slide.shapes.title
-            title_shape.text = f"Slide {page_num + 1}"
-            content_shape = slide.placeholders[1]
-            text_frame = content_shape.text_frame
-            text_frame.text = slide_text
-            text_frame.paragraphs[0].font.size = Pt(14)
-            text_frame.paragraphs[0].alignment = PP_ALIGN.LEFT
-        
-        # Save to temp file
+        # Match slide size to PDF page dimensions of first page (or default 16:9)
+        first_page = pdf_doc[0]
+        pdf_w = first_page.rect.width   # points
+        pdf_h = first_page.rect.height  # points
+        # Convert PDF points → EMU (1 pt = 12700 EMU)
+        prs.slide_width  = Emu(int(pdf_w * 12700))
+        prs.slide_height = Emu(int(pdf_h * 12700))
+
+        blank_layout = prs.slide_layouts[6]  # fully blank — no placeholders
+
+        # Render scale: 2x for crisp quality without being too heavy
+        RENDER_SCALE = 2.0
+        mat = fitz.Matrix(RENDER_SCALE, RENDER_SCALE)
+
+        for page_num in range(len(pdf_doc)):
+            page = pdf_doc[page_num]
+            page_w = page.rect.width
+            page_h = page.rect.height
+
+            # ── 1. Render full page as PNG → slide background ────────────
+            # This preserves ALL visuals: background color, gradients,
+            # decorative shapes, images, rendered fonts — pixel-perfect.
+            pixmap = page.get_pixmap(matrix=mat, alpha=False)
+            img_bytes = pixmap.tobytes("png")
+            bg_buf = io.BytesIO(img_bytes)
+            bg_buf.seek(0)
+
+            slide = prs.slides.add_slide(blank_layout)
+            # Place background image covering the entire slide
+            slide.shapes.add_picture(
+                bg_buf,
+                left=0, top=0,
+                width=prs.slide_width,
+                height=prs.slide_height
+            )
+
+            # ── 2. Overlay transparent text boxes with positioned text ───
+            # Extract rich text dict: preserves per-span font, size, color,
+            # bold, italic, and exact bounding box on the page.
+            text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+
+            for block in text_dict.get("blocks", []):
+                if block.get("type") != 0:   # 0 = text block; skip image blocks
+                    continue
+
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        span_text = span.get("text", "").strip()
+                        if not span_text:
+                            continue
+
+                        # Bounding box of this span in PDF points
+                        x0, y0, x1, y1 = span["bbox"]
+                        span_w = max(x1 - x0, 1)
+                        span_h = max(y1 - y0, 1)
+
+                        # Scale from PDF points → EMU
+                        left   = Emu(int(x0 * 12700))
+                        top    = Emu(int(y0 * 12700))
+                        width  = Emu(int(span_w * 12700))
+                        height = Emu(int(span_h * 12700 * 1.4))  # slight pad so text fits
+
+                        txb = slide.shapes.add_textbox(left, top, width, height)
+                        tf  = txb.text_frame
+                        tf.word_wrap = False
+
+                        p   = tf.paragraphs[0]
+                        run = p.add_run()
+                        run.text = span_text
+
+                        # Font size from PDF (in points)
+                        font_size = span.get("size", 12)
+                        run.font.size = Pt(max(font_size, 6))
+
+                        # Bold / italic from PDF flags
+                        flags = span.get("flags", 0)
+                        run.font.bold   = bool(flags & 2 ** 4)   # bit 4 = bold
+                        run.font.italic = bool(flags & 2 ** 1)   # bit 1 = italic
+
+                        # Font color from PDF (stored as 0xRRGGBB int)
+                        raw_color = span.get("color", 0)
+                        if raw_color is not None:
+                            try:
+                                r = (raw_color >> 16) & 0xFF
+                                g = (raw_color >> 8)  & 0xFF
+                                b =  raw_color        & 0xFF
+                                run.font.color.rgb = RGBColor(r, g, b)
+                            except Exception:
+                                pass  # leave color default if anything goes wrong
+
+                        # Font name from PDF when available
+                        font_name = span.get("font", "")
+                        if font_name:
+                            # Clean up PDF font name suffixes like "ABCDEF+Arial-Bold"
+                            clean_name = font_name.split("+")[-1].split("-")[0].strip()
+                            if clean_name:
+                                try:
+                                    run.font.name = clean_name
+                                except Exception:
+                                    pass
+
+                        # Make textbox background transparent (no fill)
+                        from pptx.oxml.ns import qn
+                        from lxml import etree
+                        spPr = txb._element.find(qn('p:sp') + '/' + qn('p:spPr'), txb._element.nsmap)
+                        if spPr is None:
+                            spPr = txb._element.spPr if hasattr(txb._element, 'spPr') else None
+                        if spPr is not None:
+                            # Remove any existing fill and set noFill
+                            for existing in spPr.findall(qn('a:solidFill')):
+                                spPr.remove(existing)
+                            no_fill = etree.SubElement(spPr, qn('a:noFill'))  # noqa
+
+        pdf_doc.close()
         prs.save(output_path)
-        
-        # Verify file was created
+
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             raise Exception("PPT conversion failed - output file is empty or missing")
-        
-        # Store in session for preview/download endpoints
-        session['ppt_result_id'] = ppt_id
-        session['ppt_result_path'] = output_path
+
+        session['ppt_result_id']       = ppt_id
+        session['ppt_result_path']     = output_path
         session['ppt_result_filename'] = original_filename
         session.modified = True
-        
-        # Return JSON response (no auto-download - user chooses preview or download)
-        file_size = os.path.getsize(output_path)
+
         return jsonify({
             'status': 'success',
             'ppt_id': ppt_id,
             'filename': original_filename,
-            'file_size': file_size
+            'file_size': os.path.getsize(output_path)
         }), 200
 
     except Exception as e:
+        logger.error(f'PDF to PPT conversion failed: {str(e)}', exc_info=True)
         return jsonify({'error': f'PDF to PPT conversion failed: {str(e)}'}), 500
 
 @app.route('/preview-ppt', methods=['GET'])
@@ -3263,14 +3363,28 @@ def remove_background():
 
     temp_file_path = None
     try:
-        image = Image.open(file.stream)
-        if image.size[0] > 4096 or image.size[1] > 4096:
-            return jsonify({'error': 'Image resolution exceeds 4096x4096 limit'}), 400
-        if file.filename.lower().endswith('.gif'):
-            image.seek(0)
+        # Read raw bytes once — reliable size check (content_length is often None in Flask)
+        file.stream.seek(0)
+        image_bytes = file.stream.read()
+        if len(image_bytes) > 10 * 1024 * 1024:
+            return jsonify({'error': 'File size exceeds 10MB limit'}), 400
+
+        image = Image.open(io.BytesIO(image_bytes))
+
+        # Resize images larger than 1024px on either side to cut rembg processing time
+        MAX_DIM = 1024
+        if image.size[0] > MAX_DIM or image.size[1] > MAX_DIM:
+            image.thumbnail((MAX_DIM, MAX_DIM), Image.LANCZOS)
+            logger.info(f"Image resized to {image.size} for faster bg removal")
+
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
-        output_image = remove(image)
+
+        # rembg works best with raw PNG bytes — convert PIL image → bytes first
+        _buf_in = io.BytesIO()
+        image.save(_buf_in, format='PNG')
+        output_bytes = remove(_buf_in.getvalue())   # remove() imported inside this function
+        output_image = Image.open(io.BytesIO(output_bytes)).convert('RGBA')
 
         output_filename = f"bg_removed_{uuid.uuid4().hex}.png"
         

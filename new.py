@@ -3349,768 +3349,173 @@ def download_ppt():
 @app.route('/remove_background', methods=['POST'])
 @login_required
 def remove_background():
-    from rembg import remove
     logger.debug("Received request at /remove_background")
+ 
     if 'image' not in request.files:
         logger.error("No image uploaded")
         return jsonify({'error': 'No image uploaded!'}), 400
+ 
     file = request.files['image']
     valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp')
+ 
     if not file.filename.lower().endswith(valid_extensions):
-        return jsonify({'error': 'Unsupported file extension'}), 400
-    if file.content_length and file.content_length > 10 * 1024 * 1024:
-        return jsonify({'error': 'File size exceeds 10MB limit'}), 400
-
-    temp_file_path = None
+        return jsonify({'error': 'Unsupported file type. Please upload a JPG, PNG, GIF, BMP, TIFF, or WebP image.'}), 400
+ 
     try:
-        # Read raw bytes once — reliable size check (content_length is often None in Flask)
+        # ── 1. Read raw bytes (reliable size check) ──────────────────
         file.stream.seek(0)
         image_bytes = file.stream.read()
+        if len(image_bytes) == 0:
+            return jsonify({'error': 'Uploaded file is empty.'}), 400
         if len(image_bytes) > 10 * 1024 * 1024:
-            return jsonify({'error': 'File size exceeds 10MB limit'}), 400
-
-        image = Image.open(io.BytesIO(image_bytes))
-
-        # Resize images larger than 1024px on either side to cut rembg processing time
+            return jsonify({'error': 'File size exceeds 10 MB limit.'}), 400
+ 
+        # ── 2. Validate image can be opened ──────────────────────────
+        try:
+            image = Image.open(io.BytesIO(image_bytes))
+            image.verify()                          # catch truncated / corrupt files
+            image = Image.open(io.BytesIO(image_bytes))   # re-open after verify()
+        except Exception as img_err:
+            logger.error(f"Image validation failed: {img_err}")
+            return jsonify({'error': f'Invalid or corrupted image file: {img_err}'}), 400
+ 
+        # ── 3. Optional resize for speed ─────────────────────────────
         MAX_DIM = 1024
         if image.size[0] > MAX_DIM or image.size[1] > MAX_DIM:
             image.thumbnail((MAX_DIM, MAX_DIM), Image.LANCZOS)
             logger.info(f"Image resized to {image.size} for faster bg removal")
-
+ 
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
-
-        # rembg works best with raw PNG bytes — convert PIL image → bytes first
-        _buf_in = io.BytesIO()
-        image.save(_buf_in, format='PNG')
-        output_bytes = remove(_buf_in.getvalue())   # remove() imported inside this function
-        output_image = Image.open(io.BytesIO(output_bytes)).convert('RGBA')
-
+ 
+        # ── 4. rembg — remove background ────────────────────────────
+        try:
+            from rembg import remove as rembg_remove
+        except ImportError:
+            logger.error("rembg library is not installed")
+            return jsonify({'error': 'Background removal library (rembg) is not installed on the server.'}), 500
+ 
+        try:
+            _buf_in = io.BytesIO()
+            image.save(_buf_in, format='PNG')
+            _buf_in.seek(0)
+            output_bytes = rembg_remove(_buf_in.getvalue())
+        except Exception as rembg_err:
+            logger.error(f"rembg processing failed: {rembg_err}", exc_info=True)
+            return jsonify({'error': f'Background removal processing failed: {rembg_err}'}), 500
+ 
+        # ── 5. Load result image ─────────────────────────────────────
+        try:
+            output_image = Image.open(io.BytesIO(output_bytes)).convert('RGBA')
+        except Exception as load_err:
+            logger.error(f"Failed to load rembg output: {load_err}")
+            return jsonify({'error': 'Background removal produced invalid output.'}), 500
+ 
+        # ── 6. Save result to temp file for download endpoint ─────────
         output_filename = f"bg_removed_{uuid.uuid4().hex}.png"
-        
-        # Save to disk for download endpoint
         OUTPUT_FOLDER = 'converted'
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
         output_path = os.path.join(OUTPUT_FOLDER, output_filename)
         output_image.save(output_path, format='PNG')
-        
-        # Also save to memory buffer for Cloudinary
-        img_buffer = io.BytesIO()
-        output_image.save(img_buffer, format='PNG')
-        img_buffer.seek(0)
-
-        username = session.get('username')
-        cloudinary_folder = f'storage/{username}/img'
-        
-        # Upload from buffer to Cloudinary
-        img_buffer.seek(0)
-        cloudinary_result = cloudinary.uploader.upload(img_buffer, 
-                                                     folder=cloudinary_folder,
-                                                     resource_type='raw',
-                                                     public_id=output_filename)
-        cloudinary_url = cloudinary_result['secure_url']
-        store_url_in_firebase(cloudinary_url, 'img', output_filename)
-
+        logger.debug(f"Result saved to: {output_path}")
+ 
+        # ── 7. Build base64 preview for instant display in browser ────
+        preview_buf = io.BytesIO()
+        output_image.save(preview_buf, format='PNG')
+        preview_buf.seek(0)
+        preview_b64 = base64.b64encode(preview_buf.getvalue()).decode('utf-8')
+        preview_data_url = f"data:image/png;base64,{preview_b64}"
+ 
+        # ── 8. Upload to Cloudinary ───────────────────────────────────
+        cloudinary_url = None
+        try:
+            img_buffer = io.BytesIO()
+            output_image.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            username = session.get('username')
+            cloudinary_folder = f'storage/{username}/img'
+            cloudinary_result = cloudinary.uploader.upload(
+                img_buffer,
+                folder=cloudinary_folder,
+                resource_type='raw',
+                public_id=output_filename
+            )
+            cloudinary_url = cloudinary_result['secure_url']
+            store_url_in_firebase(cloudinary_url, 'img', output_filename)
+        except Exception as cloud_err:
+            logger.warning(f"Cloudinary upload failed (non-fatal): {cloud_err}")
+ 
         log_conversion('background-remover', file.filename, output_filename, output_path, cloudinary_url)
-
-        # Return JSON with download URL instead of direct download
-        download_url = f'/download_bg_removed/{output_filename}'
-        logger.debug(f"Returning download URL: {download_url}")
+ 
+        # ── 9. Schedule cleanup of the local file (5 minutes) ─────────
+        def _cleanup_file(path, delay=300):
+            time.sleep(delay)
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+                    logger.debug(f"Cleaned up temp file: {path}")
+            except Exception as e:
+                logger.warning(f"Cleanup failed for {path}: {e}")
+ 
+        threading.Thread(target=_cleanup_file, args=(output_path,), daemon=True).start()
+ 
+        logger.debug("Background removal successful")
         return jsonify({
             'success': True,
-            'download_url': download_url,
+            'download_url': f'/download_bg_removed/{output_filename}',
+            'preview_url': preview_data_url,          # ← inline base64 for instant display
             'filename': output_filename,
             'cloudinary_url': cloudinary_url,
             'message': 'Background removed successfully!'
         }), 200
+ 
     except Exception as e:
-        logger.error(f"Background removal failed: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Background removal failed: {str(e)}'}), 500
-
+        logger.error(f"Background removal failed: {e}", exc_info=True)
+        return jsonify({'error': f'Background removal failed: {e}'}), 500
+ 
+ 
 @app.route('/download_bg_removed/<filename>', methods=['GET'])
 @login_required
 def download_bg_removed(filename):
     try:
-        # Validate filename to prevent path traversal attacks
+        # Prevent path traversal
         if '..' in filename or '/' in filename or '\\' in filename:
             logger.error(f"Invalid filename attempt: {filename}")
             return jsonify({'error': 'Invalid filename'}), 400
-        
+ 
         OUTPUT_FOLDER = 'converted'
         file_path = os.path.join(OUTPUT_FOLDER, filename)
-        
-        # Check if file exists
+ 
         if not os.path.exists(file_path):
-            logger.error(f"File not found: {file_path}")
-            return jsonify({'error': 'File not found'}), 404
-        
+            # Try Cloudinary as fallback
+            logger.warning(f"Local file not found, attempting Cloudinary fallback: {file_path}")
+            username = session.get('username')
+            safe_key = re.sub(r'[./#$\[\]]', '_', filename)
+            ref = db.reference(f'storage/{username}/img/{safe_key}')
+            data = ref.get()
+            if data and 'url' in data:
+                r = requests.get(data['url'], timeout=15)
+                if r.status_code == 200:
+                    return send_file(
+                        io.BytesIO(r.content),
+                        as_attachment=True,
+                        download_name='background_removed.png',
+                        mimetype='image/png'
+                    )
+            return jsonify({'error': 'File not found. It may have expired — please process the image again.'}), 404
+ 
         logger.debug(f"Downloading file: {file_path}")
-        return send_file(file_path, as_attachment=True, download_name='background_removed.png', mimetype='image/png')
-    except Exception as e:
-        logger.error(f"Download failed: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
-
-# --- Other routes like Page Count, Remove Pages, Compress, Split PDFs ---
-# --- Following the same pattern updating to per-user storage paths in DB/cloud ---
-
-@app.route('/get-page-count', methods=['POST'])
-@login_required
-def get_page_count():
-    pdf = request.files.get('pdf')
-    if not pdf:
-        return jsonify({'error': 'No PDF uploaded'}), 400
-    filename = secure_filename(pdf.filename)
-    
-    # Use temporary file instead of upload folder
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-        pdf.save(temp_file)
-        filepath = temp_file.name
-    try:
-        reader = PdfReader(filepath)
-        count = len(reader.pages)
-        os.remove(filepath)
-        return jsonify({'page_count': count})
-    except Exception as e:
-        os.remove(filepath)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/remove-pages', methods=['POST'])
-@login_required
-def remove_pages():
-    pdf = request.files.get('pdf')
-    removed_pages = request.form.get('removed_pages', '')
-    total_pages = int(request.form.get('page_count', 0))
-    if not pdf:
-        return jsonify({'error': 'No PDF uploaded'}), 400
-    try:
-        # Convert page numbers (1-based) to indices (0-based)
-        remove_page_numbers = [int(i) for i in removed_pages.split(',') if i.strip().isdigit()]
-        remove_indices = [page - 1 for page in remove_page_numbers if 1 <= page <= total_pages]
-    except ValueError:
-        return jsonify({'error': 'Invalid page numbers'}), 400
-    
-    if not remove_indices:
-        return jsonify({'error': 'No valid page numbers provided'}), 400
-    
-    filename = secure_filename(pdf.filename)
-    
-    # Use temporary file to read original PDF
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-        pdf.save(temp_file)
-        filepath = temp_file.name
-    
-    try:
-        reader = PdfReader(filepath)
-        writer = PdfWriter()
-        
-        # Generate final PDF with selected pages removed
-        for i in range(len(reader.pages)):
-            if i not in remove_indices:
-                writer.add_page(reader.pages[i])
-        
-        # Create unique ID for this removal result and store in temp directory
-        remove_id = uuid.uuid4().hex
-        temp_dir = os.path.join(tempfile.gettempdir(), 'docshift_remove_pages')
-        os.makedirs(temp_dir, exist_ok=True)
-        result_pdf_path = os.path.join(temp_dir, f'{remove_id}.pdf')
-        
-        # Write final PDF to temp file (not to memory)
-        with open(result_pdf_path, 'wb') as f:
-            writer.write(f)
-        
-        # Store in session for preview/download endpoints
-        session['remove_result_id'] = remove_id
-        session['remove_result_path'] = result_pdf_path
-        session['remove_result_filename'] = filename
-        session['remove_pages_removed_count'] = len(remove_indices)
-        session['remove_pages_total'] = total_pages
-        session.modified = True
-        
-        # Return JSON response (no auto-download - user chooses preview or download)
-        file_size = os.path.getsize(result_pdf_path)
-        return jsonify({
-            'status': 'success',
-            'remove_id': remove_id,
-            'pages_removed': len(remove_indices),
-            'pages_remaining': total_pages - len(remove_indices),
-            'file_size': file_size
-        }), 200
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    
-    finally:
-        # Clean up input PDF temp file
-        if os.path.exists(filepath):
-            os.remove(filepath)
-
-@app.route('/preview-removed-pdf', methods=['GET'])
-@login_required
-def preview_removed_pdf():
-    result_path = session.get('remove_result_path')
-    if not result_path or not os.path.exists(result_path):
-        return "File not found", 404
-    
-    return send_file(result_path, mimetype='application/pdf', as_attachment=False)
-
-@app.route('/download-removed-pdf', methods=['GET'])
-@login_required
-def download_removed_pdf():
-    result_path = session.get('remove_result_path')
-    result_filename = session.get('remove_result_filename', 'removed_pages.pdf')
-    
-    if not result_path or not os.path.exists(result_path):
-        return "File not found", 404
-    
-    # Log conversion before download
-    pages_removed = session.get('remove_pages_removed_count', 0)
-    pages_remaining = session.get('remove_pages_total', 0) - pages_removed
-    log_conversion('remove-pages', result_filename, 'removed_pages.pdf', 'file', result_path, 'success')
-    
-    # Upload to Cloudinary
-    username = session.get('username')
-    cloudinary_folder = f'storage/{username}/files'
-    
-    try:
-        cloudinary_result = cloudinary.uploader.upload(result_path, 
-                                                      folder=cloudinary_folder,
-                                                      resource_type='raw',
-                                                      public_id=f'removed_{uuid.uuid4().hex}.pdf')
-        cloudinary_url = cloudinary_result['secure_url']
-        store_url_in_firebase(cloudinary_url, 'files', 'removed_pages.pdf')
-    except Exception as e:
-        print(f"Cloudinary upload error: {e}")
-    
-    # Background cleanup
-    def cleanup():
-        import time
-        time.sleep(2)
-        if os.path.exists(result_path):
-            os.remove(result_path)
-        session.pop('remove_result_id', None)
-        session.pop('remove_result_path', None)
-        session.pop('remove_result_filename', None)
-        session.pop('remove_pages_removed_count', None)
-        session.pop('remove_pages_total', None)
-    
-    cleanup_thread = threading.Thread(target=cleanup, daemon=True)
-    cleanup_thread.start()
-    
-    return send_file(result_path, as_attachment=True, download_name='removed_pages.pdf', mimetype='application/pdf')
-
-@app.route('/compress', methods=['POST'])
-@login_required
-def compress_pdf():
-    pdf_file = request.files.get('pdf')
-    compression_level = request.form.get('compression_level')
-    
-    if not pdf_file:
-        return "No PDF uploaded", 400
-    
-    if compression_level not in ['low', 'medium', 'high']:
-        return "Invalid compression level", 400
-    
-    filename = secure_filename(pdf_file.filename)
-    
-    # Use temporary file instead of upload folder
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-        pdf_file.save(temp_file)
-        filepath = temp_file.name
-    
-    try:
-        original_size = os.path.getsize(filepath)
-        logger.info(f"Original file size: {original_size / 1024:.2f} KB")
-        
-        output_filename = f"compressed_{uuid.uuid4().hex}.pdf"
-        
-        # Try Ghostscript first for better compression
-        if is_ghostscript_installed():
-            logger.info("Using Ghostscript for compression")
-            gs_quality = {'low': 'printer', 'medium': 'ebook', 'high': 'screen'}
-            gs_setting = gs_quality[compression_level]
-            
-            # Create temporary output file for Ghostscript
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_output:
-                temp_output_path = temp_output.name
-            
-            gs_command = [
-                'gs', '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4',
-                f'-dPDFSETTINGS=/{gs_setting}', '-dNOPAUSE', '-dQUIET', '-dBATCH',
-                f'-sOutputFile={temp_output_path}', filepath
-            ]
-            result = subprocess.run(gs_command, capture_output=True, text=True)
-            if result.returncode != 0:
-                logger.error(f"Ghostscript failed: {result.stderr}")
-                raise Exception(f"Ghostscript compression failed: {result.stderr}")
-            
-            # Read compressed PDF into memory
-            with open(temp_output_path, 'rb') as f:
-                compressed_pdf_data = f.read()
-            
-            # Clean up temp file
-            os.remove(temp_output_path)
-            
-        else:
-            # Fallback to PyMuPDF compression with actual image processing
-            logger.warning("Ghostscript not available, using PyMuPDF compression")
-            doc = None
-            try:
-                doc = fitz.open(filepath)
-                
-                # Define compression settings based on level
-                if compression_level == 'low':
-                    # Light compression - preserve quality
-                    image_quality = 85
-                    downscale_factor = 1.0
-                elif compression_level == 'medium':
-                    # Moderate compression - balance quality and size
-                    image_quality = 60
-                    downscale_factor = 0.8
-                else:  # high
-                    # Heavy compression - prioritize size reduction
-                    image_quality = 30
-                    downscale_factor = 0.6
-                
-                # Process each page and compress images
-                images_processed = 0
-                for page_num in range(len(doc)):
-                    page = doc.load_page(page_num)
-                    image_list = page.get_images(full=True)
-                    
-                    for img_index, img in enumerate(image_list):
-                        try:
-                            # Get image data
-                            xref = img[0]
-                            base_image = doc.extract_image(xref)
-                            image_bytes = base_image["image"]
-                            
-                            # Load image with PIL
-                            pil_image = Image.open(io.BytesIO(image_bytes))
-                            
-                            # Resize image if needed
-                            if downscale_factor < 1.0:
-                                new_width = int(pil_image.width * downscale_factor)
-                                new_height = int(pil_image.height * downscale_factor)
-                                pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                            
-                            # Convert to RGB if necessary
-                            if pil_image.mode != 'RGB':
-                                pil_image = pil_image.convert('RGB')
-                            
-                            # Compress image
-                            img_buffer = io.BytesIO()
-                            pil_image.save(img_buffer, format='JPEG', quality=image_quality, optimize=True)
-                            img_buffer.seek(0)
-                            
-                            # Replace image in PDF
-                            doc._updateObject(xref, img_buffer.getvalue())
-                            images_processed += 1
-                            
-                        except Exception as e:
-                            logger.warning(f"Failed to process image {img_index} on page {page_num}: {str(e)}")
-                            continue
-                
-                logger.info(f"Processed {images_processed} images for compression")
-                
-                # Save to memory buffer instead of file
-                pdf_buffer = io.BytesIO()
-                doc.save(pdf_buffer, deflate=True, clean=True)
-                compressed_pdf_data = pdf_buffer.getvalue()
-                
-            finally:
-                # Ensure document is properly closed
-                if doc is not None:
-                    doc.close()
-        
-        # Verify compression worked
-        if not compressed_pdf_data or len(compressed_pdf_data) == 0:
-            raise Exception("Compression failed - output file is empty or missing")
-        
-        compressed_size = len(compressed_pdf_data)
-        logger.info(f"Compressed file size: {compressed_size / 1024:.2f} KB")
-        reduction = (original_size - compressed_size) / original_size * 100 if original_size > 0 else 0
-        logger.info(f"Size reduction: {reduction:.2f}%")
-
-        # Log conversion for tracking purposes
-        log_conversion('compress-pdf', filename, output_filename, "memory_cache", None, 'success')
-
-        # Clean up input file
-        try:
-            os.remove(filepath)
-        except PermissionError:
-            logger.warning(f"Could not delete input file {filepath} - file may be in use")
-        
-        # Store compressed PDF data in memory cache (no cloud upload yet)
-        compressed_pdf_cache[output_filename] = compressed_pdf_data
-        
-        logger.info(f"Compression successful: {output_filename}")
-        
-        # Return success response with download URL
-        return jsonify({
-            'success': True,
-            'download_url': f'/download-compressed/{output_filename}',
-            'filename': output_filename,
-            'original_size': f"{original_size / 1024:.2f} KB",
-            'compressed_size': f"{compressed_size / 1024:.2f} KB",
-            'reduction': f"{reduction:.2f}%",
-            'message': f'PDF successfully compressed with {reduction:.2f}% size reduction'
-        })
-        
-    except Exception as e:
-        # Clean up input file on error
-        try:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-        except PermissionError:
-            logger.warning(f"Could not delete input file {filepath} - file may be in use")
-        except Exception as cleanup_error:
-            logger.warning(f"Error during cleanup: {str(cleanup_error)}")
-        
-        logger.error(f"Error during compression: {str(e)}")
-        return f"Error during compression: {str(e)}", 500
-
-# Store split PDFs and compressed PDFs in memory for immediate download
-split_pdf_cache = {}
-compressed_pdf_cache = {}
-audio_cache = {}
-
-@app.route('/download-split/<filename>')
-@login_required
-def download_split_pdf(filename):
-    # Check if file exists in memory cache
-    if filename not in split_pdf_cache:
-        return jsonify({'error': 'File not found or expired'}), 404
-    
-    try:
-        # Get PDF data from memory cache
-        pdf_data = split_pdf_cache[filename]
-        
-        # Create a BytesIO object with the PDF data first
-        pdf_buffer = io.BytesIO(pdf_data)
-        pdf_buffer.seek(0)
-        
-        # Now upload to cloud storage when user actually downloads
-        try:
-            # Upload from buffer
-            pdf_buffer.seek(0)
-            username = session.get('username')
-            cloudinary_folder = f'storage/{username}/files'
-            cloudinary_result = cloudinary.uploader.upload(pdf_buffer, 
-                                                         folder=cloudinary_folder,
-                                                         resource_type='raw',
-                                                         public_id=filename)
-            cloudinary_url = cloudinary_result['secure_url']
-            store_url_in_firebase(cloudinary_url, 'files', filename)
-        except Exception as cloud_error:
-            # If cloud upload fails, still serve the file
-            logger.warning(f"Cloud upload failed: {str(cloud_error)}")
-        
-        # Clean up from cache after preparing to serve
-        if filename in split_pdf_cache:
-            del split_pdf_cache[filename]
-        
-        # Make sure the buffer is at the beginning
-        pdf_buffer.seek(0)
-        
         return send_file(
-            pdf_buffer, 
-            as_attachment=True, 
-            download_name=filename, 
-            mimetype='application/pdf'
+            file_path,
+            as_attachment=True,
+            download_name='background_removed.png',
+            mimetype='image/png'
         )
+ 
     except Exception as e:
-        # Clean up from cache on error
-        if filename in split_pdf_cache:
-            del split_pdf_cache[filename]
-        logger.error(f"Download failed: {str(e)}")
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
-
-@app.route('/download-compressed/<filename>')
-@login_required
-def download_compressed_pdf(filename):
-    # Check if file exists in memory cache
-    if filename not in compressed_pdf_cache:
-        return jsonify({'error': 'File not found or expired'}), 404
-    
-    try:
-        # Get PDF data from memory cache
-        pdf_data = compressed_pdf_cache[filename]
-        
-        # Create a BytesIO object with the PDF data first
-        pdf_buffer = io.BytesIO(pdf_data)
-        pdf_buffer.seek(0)
-        
-        # Now upload to cloud storage when user actually downloads
-        try:
-            # Upload from buffer
-            pdf_buffer.seek(0)
-            username = session.get('username')
-            cloudinary_folder = f'storage/{username}/files'
-            cloudinary_result = cloudinary.uploader.upload(pdf_buffer, 
-                                                         folder=cloudinary_folder,
-                                                         resource_type='raw',
-                                                         public_id=filename)
-            cloudinary_url = cloudinary_result['secure_url']
-            store_url_in_firebase(cloudinary_url, 'files', filename)
-        except Exception as cloud_error:
-            # If cloud upload fails, still serve the file
-            logger.warning(f"Cloud upload failed: {str(cloud_error)}")
-        
-        # Clean up from cache after preparing to serve
-        if filename in compressed_pdf_cache:
-            del compressed_pdf_cache[filename]
-        
-        # Make sure the buffer is at the beginning
-        pdf_buffer.seek(0)
-        
-        return send_file(
-            pdf_buffer, 
-            as_attachment=True, 
-            download_name=filename, 
-            mimetype='application/pdf'
-        )
-    except Exception as e:
-        # Clean up from cache on error
-        if filename in compressed_pdf_cache:
-            del compressed_pdf_cache[filename]
-        logger.error(f"Download failed: {str(e)}")
-        return jsonify({'error': f'Download failed: {str(e)}'}), 500
-
-@app.route('/split', methods=['POST'])
-@login_required
-def split_pdf():
-    try:
-        pdf_file = request.files.get('pdf')
-        split_index = request.form.get('split_index')
-        
-        if not pdf_file or not split_index:
-            return jsonify({'error': 'Missing file or split index'}), 400
-        
-        try:
-            split_index = int(split_index)
-        except ValueError:
-            return jsonify({'error': 'Invalid split index'}), 400
-        
-        filename = secure_filename(pdf_file.filename)
-        
-        # Use temporary file instead of upload folder
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-            pdf_file.save(temp_file)
-            filepath = temp_file.name
-        
-        reader = PdfReader(filepath)
-        total_pages = len(reader.pages)
-        
-        if split_index <= 0 or split_index >= total_pages:
-            os.remove(filepath)
-            return jsonify({'error': f'Split index out of range. Must be between 1 and {total_pages - 1}'}), 400
-        
-        writer1 = PdfWriter()
-        writer2 = PdfWriter()
-        
-        for i, page in enumerate(reader.pages):
-            if i < split_index:
-                writer1.add_page(page)
-            else:
-                writer2.add_page(page)
-        
-        # Create PDF content in memory
-        pdf_buffer1 = io.BytesIO()
-        pdf_buffer2 = io.BytesIO()
-        writer1.write(pdf_buffer1)
-        writer2.write(pdf_buffer2)
-        
-        output_filename1 = f"split_part1_{uuid.uuid4().hex}.pdf"
-        output_filename2 = f"split_part2_{uuid.uuid4().hex}.pdf"
-        
-        # Log conversion for tracking purposes
-        log_conversion('split-pdf', filename, f"{output_filename1}, {output_filename2}", "memory_cache", None, 'success')
-
-        # Clean up the original file
-        os.remove(filepath)
-        
-        # Store PDF data in memory cache for immediate download (no cloud upload yet)
-        pdf_buffer1.seek(0)
-        pdf_buffer2.seek(0)
-        split_pdf_cache[output_filename1] = pdf_buffer1.getvalue()
-        split_pdf_cache[output_filename2] = pdf_buffer2.getvalue()
-        
-        logger.info(f"Split PDF successful: {output_filename1}, {output_filename2}")
-        
-        # Return download URLs that serve from memory cache
-        return jsonify({
-            'success': True,
-            'part1': f'/download-split/{output_filename1}',
-            'part2': f'/download-split/{output_filename2}',
-            'part1_name': output_filename1,
-            'part2_name': output_filename2,
-            'message': f'PDF successfully split into {split_index} and {total_pages - split_index} pages'
-        })
-        
-    except Exception as e:
-        logger.error(f"Split PDF failed: {str(e)}")
-        # Clean up file if it exists
-        if 'filepath' in locals() and os.path.exists(filepath):
-            os.remove(filepath)
-        return jsonify({'error': f'Split PDF failed: {str(e)}'}), 500
-
-
-# --- Document Screener Routes ---
-
-def extract_text_from_pdf(file_path):
-    try:
-        with open(file_path, 'rb') as file:
-            reader = PdfReader(file)
-            text = ''
-            for page in reader.pages:
-                text += page.extract_text() or ''
-            return text
-    except Exception as e:
-        return f"Error extracting text from PDF: {str(e)}"
-
-def extract_text_from_docx(file_path):
-    try:
-        doc = Document(file_path)
-        text = '\n'.join([para.text for para in doc.paragraphs if para.text])
-        return text
-    except Exception as e:
-        return f"Error extracting text from DOCX: {str(e)}"
-
-def extract_text_from_txt(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return file.read()
-    except Exception as e:
-        return f"Error extracting text from TXT: {str(e)}"
-
-def analyze_text_with_openrouter(text, format_type):
-    prompt = (
-        f"Analyze the following document text and provide a summary in "
-        f"{'a concise paragraph' if format_type == 'paragraph' else 'bullet points'}. "
-        f"Focus on key themes, topics, or entities mentioned in the text.\n\n"
-        f"Text:\n{text[:2000]}"
-    )
-
-    headers = {
-        'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-        'Content-Type': 'application/json'
-    }
-
-    data = {
-        'model': OPENROUTER_MODEL,
-        'messages': [{'role': 'user', 'content': prompt}]
-    }
-
-    try:
-        response = requests.post(OPENROUTER_API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        result = response.json()
-        return result['choices'][0]['message']['content']
-    except Exception as e:
-        logger.error(f"OpenRouter API error: {str(e)}")
-        return f"Error analyzing text with OpenRouter: {str(e)}"
-
-
-@app.route('/analyze_document', methods=['POST'])
-@login_required
-def analyze_document():
-    global current_document_text, conversation_history
-    try:
-        if 'docFile' not in request.files:
-            return jsonify({'error': 'No document provided'}), 400
-        doc_file = request.files['docFile']
-        format_type = request.form.get('format', 'paragraph')
-        temp_file_path = None
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{doc_file.filename.split('.')[-1]}") as temp_file:
-            doc_file.save(temp_file)
-            temp_file_path = temp_file.name
-        file_extension = doc_file.filename.lower().split('.')[-1]
-        if file_extension == 'pdf':
-            text = extract_text_from_pdf(temp_file_path)
-        elif file_extension == 'docx':
-            text = extract_text_from_docx(temp_file_path)
-        elif file_extension == 'txt':
-            text = extract_text_from_txt(temp_file_path)
-        else:
-            os.remove(temp_file_path)
-            return jsonify({'error': 'Unsupported file type. Use PDF, DOCX, or TXT.'}), 400
-
-        os.remove(temp_file_path)
-        if text.startswith('Error'):
-            return jsonify({'error': text}), 500
-
-        # Set global variable and clear conversation history for new document
-        current_document_text = text
-        conversation_history.clear()
-        
-        logger.debug(f"Document analyzed. Text length: {len(current_document_text)}")
-        
-        analysis = analyze_text_with_openrouter(text, format_type)
-        if analysis.startswith('Error'):
-            return jsonify({'error': analysis}), 500
-
-        analysis_filename = f"analysis_{uuid.uuid4().hex}.txt"
-        
-        # Use temporary file for analysis output
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.txt', mode='w', encoding='utf-8') as temp_file:
-            temp_file.write(f"File: {doc_file.filename}\nFormat: {format_type}\nAnalysis:\n{analysis}\n\n")
-            analysis_path = temp_file.name
-
-        log_conversion('document-screener', doc_file.filename, analysis_filename, analysis_path, None, 'success')
-        
-        # Clean up temp file
-        try:
-            if os.path.exists(analysis_path):
-                os.remove(analysis_path)
-        except Exception as e:
-            logger.warning(f"Failed to clean up temp analysis file: {str(e)}")
-            
-        return jsonify({'analysis': analysis})
-    except Exception as e:
-        logger.error(f"Document analysis failed: {str(e)}")
-        return jsonify({'error': f"Document analysis failed: {str(e)}"}), 500
-
-@app.route('/chat', methods=['POST'])
-@login_required
-def chat():
-    global conversation_history, current_document_text
-    try:
-        data = request.get_json()
-        message = data.get('message', '')
-        if not message:
-            return jsonify({'error': 'No message provided'}), 400
-        
-        # Debug: Log the current document text status
-        logger.debug(f"Current document text length: {len(current_document_text) if current_document_text else 0}")
-        
-        if not current_document_text:
-            return jsonify({'error': 'No document uploaded. Please upload and analyze a document first using the "Analyze Document" button.'}), 400
-
-        context = f"Document text:\n\n{current_document_text[:2000]}\n\nConversation history:\n"
-        for role, msg in conversation_history:
-            context += f"{role}: {msg}\n"
-        prompt = f"{context}\nUser: {message}\nAssistant: Answer based on the document and conversation history. If the question is about names or specific details, extract relevant information from the document. If no relevant information is found, say so clearly."
-
-        headers = {
-            'Authorization': f'Bearer {OPENROUTER_API_KEY}',
-            'Content-Type': 'application/json'
-        }
-
-        data = {
-            'model': OPENROUTER_MODEL,
-            'messages': [{'role': 'user', 'content': prompt}]
-        }
-
-        response = requests.post(OPENROUTER_API_URL, headers=headers, json=data)
-        response.raise_for_status()
-        result = response.json()
-        response_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-        conversation_history.append(('User', message))
-        conversation_history.append(('Assistant', response_text))
-        return jsonify({'response': response_text})
-    except Exception as e:
-        logger.error(f"Chat error: {str(e)}")
-        return jsonify({'error': f"Chat failed: {str(e)}"}), 500
+        logger.error(f"Download failed: {e}", exc_info=True)
+        return jsonify({'error': f'Download failed: {e}'}), 500
+ 
 
 # --- Plagiarism Scanner ---
 

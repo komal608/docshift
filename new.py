@@ -82,7 +82,31 @@ cloudinary.config(
 
 # Flask CORS and secret key
 CORS(app)
-app.secret_key = os.urandom(24)
+
+# CRITICAL FIX: Use a stable secret key from environment variable.
+# os.urandom(24) generates a NEW key every restart → all sessions are immediately
+# invalidated on every Railway redeploy / dyno wake → users are logged out.
+# Set SECRET_KEY in Railway environment variables to a fixed random string.
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    # Fallback for local dev only — warn loudly so it is not missed.
+    import warnings
+    warnings.warn(
+        "SECRET_KEY environment variable is not set. "
+        "Sessions will be lost on every restart. "
+        "Set SECRET_KEY in your Railway environment variables.",
+        stacklevel=1
+    )
+    _secret_key = 'docshift-fallback-key-please-set-SECRET_KEY-in-env'
+app.secret_key = _secret_key
+
+# Session configuration — keep users logged in across Railway restarts / sleep cycles
+app.config['SESSION_PERMANENT'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)   # stay logged in for 7 days
+app.config['SESSION_COOKIE_HTTPONLY'] = True                    # JS cannot steal the cookie
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'                  # CSRF protection
+# On Railway HTTPS is always used; set Secure so cookie is never sent over plain HTTP
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('RAILWAY_ENVIRONMENT') is not None
 
 # Logging config
 logging.basicConfig(level=logging.DEBUG,
@@ -113,6 +137,9 @@ def login_required(f):
             if request.headers.get('Content-Type') == 'application/json' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('login'))
+        # Refresh the session lifetime on every authenticated request so
+        # active users are never logged out while they are using the app.
+        session.modified = True
         return f(*args, **kwargs)
     return decorated_function
 
@@ -1188,9 +1215,10 @@ def login():
             error = 'Incorrect password'
         else:
             role = user_data.get('role', 'user')
+            session.permanent = True          # apply PERMANENT_SESSION_LIFETIME (7 days)
             session['username'] = username
             session['role'] = role
-            session['logged_in'] = True  # fix session persistence
+            session['logged_in'] = True
             if role == 'admin':
                 return redirect(url_for('admin_dashboard'))
             else:
@@ -1199,9 +1227,7 @@ def login():
 
 @app.route('/logout')
 def logout():
-    session.pop('logged_in', None)
-    session.pop('username', None)
-    session.pop('role', None)
+    session.clear()   # clear every key, including any feature-specific temp data
     return redirect(url_for('login'))
 
 # --- Admin Routes ---

@@ -3375,169 +3375,209 @@ def download_ppt():
 @app.route('/remove_background', methods=['POST'])
 @login_required
 def remove_background():
+    """
+    Background removal using Cloudinary AI — no rembg / no heavy ML model.
+
+    Flow:
+      1. Validate & read uploaded image bytes.
+      2. Upload the original image to Cloudinary (resource_type='image').
+      3. Ask Cloudinary to apply background_removal='cloudinary_ai' via an
+         eager transformation so the derived PNG is generated server-side.
+      4. Poll Cloudinary until the derived asset is ready (up to ~30 s).
+      5. Fetch the finished PNG, build a base64 preview, store URL in Firebase,
+         and return the result to the browser.
+
+    Requirements (one-time setup in your Cloudinary dashboard):
+      • Add-ons → "Cloudinary AI Background Removal" → activate free tier.
+        URL: https://cloudinary.com/console/addons
+    """
     logger.debug("Received request at /remove_background")
- 
+
     if 'image' not in request.files:
         logger.error("No image uploaded")
         return jsonify({'error': 'No image uploaded!'}), 400
- 
+
     file = request.files['image']
     valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp')
- 
+
     if not file.filename.lower().endswith(valid_extensions):
         return jsonify({'error': 'Unsupported file type. Please upload a JPG, PNG, GIF, BMP, TIFF, or WebP image.'}), 400
- 
+
     try:
-        # ── 1. Read raw bytes (reliable size check) ──────────────────
+        # ── 1. Read & validate raw bytes ──────────────────────────────
         file.stream.seek(0)
         image_bytes = file.stream.read()
         if len(image_bytes) == 0:
             return jsonify({'error': 'Uploaded file is empty.'}), 400
         if len(image_bytes) > 10 * 1024 * 1024:
             return jsonify({'error': 'File size exceeds 10 MB limit.'}), 400
- 
-        # ── 2. Validate image can be opened ──────────────────────────
+
         try:
-            image = Image.open(io.BytesIO(image_bytes))
-            image.verify()                          # catch truncated / corrupt files
-            image = Image.open(io.BytesIO(image_bytes))   # re-open after verify()
+            _check = Image.open(io.BytesIO(image_bytes))
+            _check.verify()
         except Exception as img_err:
             logger.error(f"Image validation failed: {img_err}")
             return jsonify({'error': f'Invalid or corrupted image file: {img_err}'}), 400
- 
-        # ── 3. Optional resize for speed ─────────────────────────────
-        MAX_DIM = 1024
-        if image.size[0] > MAX_DIM or image.size[1] > MAX_DIM:
-            image.thumbnail((MAX_DIM, MAX_DIM), Image.LANCZOS)
-            logger.info(f"Image resized to {image.size} for faster bg removal")
- 
-        if image.mode != 'RGBA':
-            image = image.convert('RGBA')
- 
-        # ── 4. rembg — remove background ────────────────────────────
+
+        # ── 2. Upload original to Cloudinary with bg-removal eager transform
+        username       = session.get('username', 'anonymous')
+        output_filename = f"bg_removed_{uuid.uuid4().hex}"
+        cloudinary_folder = f'storage/{username}/img'
+
         try:
-            from rembg import remove as rembg_remove
-        except ImportError:
-            logger.error("rembg library is not installed")
-            return jsonify({'error': 'Background removal library (rembg) is not installed on the server.'}), 500
- 
-        try:
-            _buf_in = io.BytesIO()
-            image.save(_buf_in, format='PNG')
-            _buf_in.seek(0)
-            output_bytes = rembg_remove(_buf_in.getvalue())
-        except Exception as rembg_err:
-            logger.error(f"rembg processing failed: {rembg_err}", exc_info=True)
-            return jsonify({'error': f'Background removal processing failed: {rembg_err}'}), 500
- 
-        # ── 5. Load result image ─────────────────────────────────────
-        try:
-            output_image = Image.open(io.BytesIO(output_bytes)).convert('RGBA')
-        except Exception as load_err:
-            logger.error(f"Failed to load rembg output: {load_err}")
-            return jsonify({'error': 'Background removal produced invalid output.'}), 500
- 
-        # ── 6. Save result to temp file for download endpoint ─────────
-        output_filename = f"bg_removed_{uuid.uuid4().hex}.png"
-        OUTPUT_FOLDER = 'converted'
-        os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-        output_path = os.path.join(OUTPUT_FOLDER, output_filename)
-        output_image.save(output_path, format='PNG')
-        logger.debug(f"Result saved to: {output_path}")
- 
-        # ── 7. Build base64 preview for instant display in browser ────
-        preview_buf = io.BytesIO()
-        output_image.save(preview_buf, format='PNG')
-        preview_buf.seek(0)
-        preview_b64 = base64.b64encode(preview_buf.getvalue()).decode('utf-8')
-        preview_data_url = f"data:image/png;base64,{preview_b64}"
- 
-        # ── 8. Upload to Cloudinary ───────────────────────────────────
-        cloudinary_url = None
-        try:
-            img_buffer = io.BytesIO()
-            output_image.save(img_buffer, format='PNG')
-            img_buffer.seek(0)
-            username = session.get('username')
-            cloudinary_folder = f'storage/{username}/img'
-            cloudinary_result = cloudinary.uploader.upload(
-                img_buffer,
+            upload_result = cloudinary.uploader.upload(
+                io.BytesIO(image_bytes),
                 folder=cloudinary_folder,
-                resource_type='raw',
-                public_id=output_filename
+                public_id=output_filename,
+                resource_type='image',
+                # Trigger Cloudinary AI background removal as an eager transformation.
+                # This generates a derived PNG with transparent background on Cloudinary's
+                # servers — no rembg, no torch, no onnxruntime needed on Railway.
+                eager=[{
+                    'effect': 'background_removal',
+                    'format': 'png'
+                }],
+                eager_async=False   # wait synchronously so we get the derived URL immediately
             )
-            cloudinary_url = cloudinary_result['secure_url']
-            store_url_in_firebase(cloudinary_url, 'img', output_filename)
-        except Exception as cloud_err:
-            logger.warning(f"Cloudinary upload failed (non-fatal): {cloud_err}")
- 
-        log_conversion('background-remover', file.filename, output_filename, output_path, cloudinary_url)
- 
-        # ── 9. Schedule cleanup of the local file (5 minutes) ─────────
-        def _cleanup_file(path, delay=300):
-            time.sleep(delay)
-            try:
-                if os.path.exists(path):
-                    os.remove(path)
-                    logger.debug(f"Cleaned up temp file: {path}")
-            except Exception as e:
-                logger.warning(f"Cleanup failed for {path}: {e}")
- 
-        threading.Thread(target=_cleanup_file, args=(output_path,), daemon=True).start()
- 
-        logger.debug("Background removal successful")
+            logger.info(f"Cloudinary upload success: {upload_result.get('public_id')}")
+        except Exception as upload_err:
+            logger.error(f"Cloudinary upload failed: {upload_err}", exc_info=True)
+            return jsonify({'error': f'Image upload to processing server failed: {upload_err}'}), 500
+
+        # ── 3. Extract the bg-removed derived URL from eager results ──
+        # 'eager' contains the list of derived transformations Cloudinary applied.
+        cloudinary_url = None
+        eager_list = upload_result.get('eager', [])
+        if eager_list:
+            cloudinary_url = eager_list[0].get('secure_url')
+            logger.info(f"Eager bg-removed URL: {cloudinary_url}")
+
+        # ── 4. Fallback: build the transformation URL manually if eager
+        #       was queued asynchronously and poll until the asset is ready.
+        if not cloudinary_url:
+            # Build the Cloudinary delivery URL with background_removal effect
+            public_id = upload_result.get('public_id', '')
+            from cloudinary import CloudinaryImage
+            cloudinary_url = CloudinaryImage(public_id).build_url(
+                effect='background_removal',
+                format='png',
+                secure=True
+            )
+            logger.info(f"Polling Cloudinary bg-removal URL: {cloudinary_url}")
+
+            # Poll until Cloudinary has finished processing (up to 40 s)
+            bg_ready = False
+            for attempt in range(20):
+                time.sleep(2)
+                try:
+                    poll_resp = requests.head(cloudinary_url, timeout=10)
+                    if poll_resp.status_code == 200:
+                        bg_ready = True
+                        logger.info(f"Cloudinary bg-removal ready after {(attempt+1)*2}s")
+                        break
+                    logger.debug(f"Poll attempt {attempt+1}: HTTP {poll_resp.status_code}")
+                except Exception as poll_err:
+                    logger.debug(f"Poll attempt {attempt+1} error: {poll_err}")
+
+            if not bg_ready:
+                logger.warning("Cloudinary bg-removal did not finish in 40s; returning URL anyway")
+
+        # ── 5. Fetch the finished PNG to build a base64 inline preview ─
+        preview_data_url = None
+        final_png_bytes  = None
+        try:
+            fetch_resp = requests.get(cloudinary_url, timeout=30)
+            if fetch_resp.status_code == 200:
+                final_png_bytes = fetch_resp.content
+                preview_b64 = base64.b64encode(final_png_bytes).decode('utf-8')
+                preview_data_url = f"data:image/png;base64,{preview_b64}"
+                logger.debug("Built base64 preview from Cloudinary result")
+            else:
+                logger.warning(f"Could not fetch bg-removed image (HTTP {fetch_resp.status_code}); preview skipped")
+        except Exception as fetch_err:
+            logger.warning(f"Preview fetch failed (non-fatal): {fetch_err}")
+
+        # ── 6. Store URL in Firebase for history / download fallback ───
+        try:
+            store_url_in_firebase(cloudinary_url, 'img', output_filename + '.png')
+        except Exception as fb_err:
+            logger.warning(f"Firebase store failed (non-fatal): {fb_err}")
+
+        output_filename_png = output_filename + '.png'
+        log_conversion('background-remover', file.filename, output_filename_png, None, cloudinary_url)
+
+        logger.debug("Background removal (Cloudinary AI) successful")
         return jsonify({
             'success': True,
-            'download_url': f'/download_bg_removed/{output_filename}',
-            'preview_url': preview_data_url,          # ← inline base64 for instant display
-            'filename': output_filename,
+            'download_url': f'/download_bg_removed/{output_filename_png}',
+            'preview_url': preview_data_url,      # inline base64 for instant display
+            'filename': output_filename_png,
             'cloudinary_url': cloudinary_url,
             'message': 'Background removed successfully!'
         }), 200
- 
+
     except Exception as e:
         logger.error(f"Background removal failed: {e}", exc_info=True)
         return jsonify({'error': f'Background removal failed: {e}'}), 500
- 
- 
+
+
 @app.route('/download_bg_removed/<filename>', methods=['GET'])
 @login_required
 def download_bg_removed(filename):
+    """
+    Download the background-removed PNG.
+    Since Railway has an ephemeral filesystem we always fetch from Cloudinary/Firebase.
+    """
     try:
         # Prevent path traversal
         if '..' in filename or '/' in filename or '\\' in filename:
             logger.error(f"Invalid filename attempt: {filename}")
             return jsonify({'error': 'Invalid filename'}), 400
- 
-        OUTPUT_FOLDER = 'converted'
-        file_path = os.path.join(OUTPUT_FOLDER, filename)
- 
-        if not os.path.exists(file_path):
-            # Try Cloudinary as fallback
-            logger.warning(f"Local file not found, attempting Cloudinary fallback: {file_path}")
-            username = session.get('username')
-            safe_key = re.sub(r'[./#$\[\]]', '_', filename)
-            ref = db.reference(f'storage/{username}/img/{safe_key}')
+
+        username = session.get('username', 'anonymous')
+        safe_key = re.sub(r'[./#$\[\]]', '_', filename)
+
+        # ── Try Firebase → Cloudinary URL ────────────────────────────
+        try:
+            ref  = db.reference(f'storage/{username}/img/{safe_key}')
             data = ref.get()
             if data and 'url' in data:
-                r = requests.get(data['url'], timeout=15)
+                r = requests.get(data['url'], timeout=20)
                 if r.status_code == 200:
+                    logger.info(f"Serving bg-removed image from Cloudinary for {username}")
                     return send_file(
                         io.BytesIO(r.content),
                         as_attachment=True,
                         download_name='background_removed.png',
                         mimetype='image/png'
                     )
-            return jsonify({'error': 'File not found. It may have expired — please process the image again.'}), 404
- 
-        logger.debug(f"Downloading file: {file_path}")
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name='background_removed.png',
-            mimetype='image/png'
-        )
- 
+        except Exception as fb_err:
+            logger.warning(f"Firebase lookup failed: {fb_err}")
+
+        # ── Fallback: reconstruct Cloudinary URL from public_id ───────
+        try:
+            public_id_base = filename.replace('.png', '')
+            username_folder = f'storage/{username}/img/{public_id_base}'
+            from cloudinary import CloudinaryImage
+            direct_url = CloudinaryImage(username_folder).build_url(
+                effect='background_removal',
+                format='png',
+                secure=True
+            )
+            r = requests.get(direct_url, timeout=20)
+            if r.status_code == 200:
+                logger.info(f"Serving bg-removed image from reconstructed Cloudinary URL")
+                return send_file(
+                    io.BytesIO(r.content),
+                    as_attachment=True,
+                    download_name='background_removed.png',
+                    mimetype='image/png'
+                )
+        except Exception as cl_err:
+            logger.warning(f"Cloudinary direct URL fallback failed: {cl_err}")
+
+        return jsonify({'error': 'File not found. Please process the image again.'}), 404
+
     except Exception as e:
         logger.error(f"Download failed: {e}", exc_info=True)
         return jsonify({'error': f'Download failed: {e}'}), 500

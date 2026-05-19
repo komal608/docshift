@@ -2116,6 +2116,428 @@ def split_pdf_page():
 def remove_pages_ui():
     return render_template('remove_page.html', **get_user_context())
 
+
+# ──────────────────────────────────────────────
+#  SPLIT PDF
+#  HTML posts to /split  with fields: pdf, split_index
+#  HTML expects: { success, message, part1, part1_name, part2, part2_name }
+# ──────────────────────────────────────────────
+@app.route('/split', methods=['POST'])
+@login_required
+def split_pdf():
+    if 'pdf' not in request.files:
+        return jsonify({'success': False, 'error': 'No PDF file provided'}), 400
+
+    file = request.files['pdf']
+    split_index_str = request.form.get('split_index', '').strip()
+
+    if not file or not file.filename:
+        return jsonify({'success': False, 'error': 'No PDF file selected'}), 400
+    if not split_index_str:
+        return jsonify({'success': False, 'error': 'Split page number is required'}), 400
+
+    try:
+        split_index = int(split_index_str)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Split page must be a valid number'}), 400
+
+    try:
+        reader = PdfReader(file)
+        total_pages = len(reader.pages)
+
+        if split_index < 1 or split_index >= total_pages:
+            return jsonify({
+                'success': False,
+                'error': f'Split page must be between 1 and {total_pages - 1} '
+                         f'(document has {total_pages} pages)'
+            }), 400
+
+        # Part 1: pages 0 … split_index-1
+        writer1 = PdfWriter()
+        for i in range(split_index):
+            writer1.add_page(reader.pages[i])
+
+        # Part 2: pages split_index … end
+        writer2 = PdfWriter()
+        for i in range(split_index, total_pages):
+            writer2.add_page(reader.pages[i])
+
+        buf1 = io.BytesIO()
+        buf2 = io.BytesIO()
+        writer1.write(buf1)
+        writer2.write(buf2)
+
+        original_name = os.path.splitext(secure_filename(file.filename))[0]
+        part1_name = f'{original_name}_part1_pages1-{split_index}.pdf'
+        part2_name = f'{original_name}_part2_pages{split_index + 1}-{total_pages}.pdf'
+
+        # Save both parts to temp dir
+        split_id = uuid.uuid4().hex
+        temp_dir = os.path.join(tempfile.gettempdir(), 'docshift_splits')
+        os.makedirs(temp_dir, exist_ok=True)
+
+        path1 = os.path.join(temp_dir, f'{split_id}_part1.pdf')
+        path2 = os.path.join(temp_dir, f'{split_id}_part2.pdf')
+
+        bytes1 = buf1.getvalue()
+        bytes2 = buf2.getvalue()
+        with open(path1, 'wb') as f1:
+            f1.write(bytes1)
+        with open(path2, 'wb') as f2:
+            f2.write(bytes2)
+
+        session['split_id']    = split_id
+        session['split_path1'] = path1
+        session['split_path2'] = path2
+        session['split_name1'] = part1_name
+        session['split_name2'] = part2_name
+        session.modified = True
+
+        # Fire-and-forget Cloudinary upload — does NOT block the response
+        username     = session.get('username')
+        orig_filename = file.filename
+
+        def _upload_split(b1, b2, folder, pname1, pname2, fpath1, fpath2, orig_fn):
+            try:
+                r1 = cloudinary.uploader.upload(io.BytesIO(b1), folder=folder,
+                                                 resource_type='raw', public_id=pname1)
+                r2 = cloudinary.uploader.upload(io.BytesIO(b2), folder=folder,
+                                                 resource_type='raw', public_id=pname2)
+                store_url_in_firebase(r1.get('secure_url', ''), 'files', pname1)
+                store_url_in_firebase(r2.get('secure_url', ''), 'files', pname2)
+                log_conversion('split-pdf', orig_fn, pname1, fpath1, r1.get('secure_url', ''))
+            except Exception as ce:
+                logger.warning(f'Cloudinary upload failed for split PDF: {ce}')
+
+        threading.Thread(
+            target=_upload_split,
+            args=(bytes1, bytes2, f'storage/{username}/files',
+                  part1_name, part2_name, path1, path2, orig_filename),
+            daemon=True
+        ).start()
+
+        return jsonify({
+            'success':    True,
+            'message':    f'PDF split into {split_index} and {total_pages - split_index} pages.',
+            'part1':      '/download-split-part1',
+            'part1_name': part1_name,
+            'part2':      '/download-split-part2',
+            'part2_name': part2_name,
+        }), 200
+
+    except Exception as e:
+        logger.error(f'Split PDF error: {e}')
+        return jsonify({'success': False, 'error': f'Split failed: {str(e)}'}), 500
+
+
+@app.route('/download-split-part1', methods=['GET'])
+@login_required
+def download_split_part1():
+    path = session.get('split_path1')
+    name = session.get('split_name1', 'part1.pdf')
+    if not path or not os.path.exists(path):
+        return jsonify({'error': 'Part 1 not found. Please split the PDF again.'}), 404
+    return send_file(path, as_attachment=True, download_name=name, mimetype='application/pdf')
+
+
+@app.route('/download-split-part2', methods=['GET'])
+@login_required
+def download_split_part2():
+    path = session.get('split_path2')
+    name = session.get('split_name2', 'part2.pdf')
+    if not path or not os.path.exists(path):
+        return jsonify({'error': 'Part 2 not found. Please split the PDF again.'}), 404
+    return send_file(path, as_attachment=True, download_name=name, mimetype='application/pdf')
+
+
+# ──────────────────────────────────────────────
+#  REMOVE PAGES – step 1: page count check
+#  HTML posts to /get-page-count  with field: pdf
+#  HTML expects: { page_count }
+# ──────────────────────────────────────────────
+@app.route('/get-page-count', methods=['POST'])
+@login_required
+def get_page_count():
+    if 'pdf' not in request.files:
+        return jsonify({'error': 'No PDF file provided'}), 400
+    file = request.files['pdf']
+    if not file or not file.filename:
+        return jsonify({'error': 'No file selected'}), 400
+    try:
+        reader = PdfReader(file)
+        total = len(reader.pages)
+        return jsonify({'page_count': total}), 200
+    except Exception as e:
+        logger.error(f'Page count error: {e}')
+        return jsonify({'error': f'Could not read PDF: {str(e)}'}), 500
+
+
+# ──────────────────────────────────────────────
+#  REMOVE PAGES – step 2: do the removal
+#  HTML posts to /remove-pages  with fields: pdf, removed_pages, page_count
+#  HTML expects: { pages_remaining }  (success implied by 200 status)
+# ──────────────────────────────────────────────
+@app.route('/remove-pages', methods=['POST'])
+@login_required
+def remove_pages():
+    if 'pdf' not in request.files:
+        return jsonify({'error': 'No PDF file provided'}), 400
+
+    file        = request.files['pdf']
+    pages_input = request.form.get('removed_pages', '').strip()
+
+    if not file or not file.filename:
+        return jsonify({'error': 'No PDF file selected'}), 400
+    if not pages_input:
+        return jsonify({'error': 'Please specify pages to remove'}), 400
+
+    try:
+        reader      = PdfReader(file)
+        total_pages = len(reader.pages)
+
+        # Parse "1,3,5-7" → set of 1-based page numbers
+        pages_to_remove = set()
+        for part in pages_input.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            if '-' in part:
+                s, e = part.split('-', 1)
+                for p in range(int(s.strip()), int(e.strip()) + 1):
+                    pages_to_remove.add(p)
+            else:
+                pages_to_remove.add(int(part))
+
+        # Validate
+        invalid = [p for p in pages_to_remove if p < 1 or p > total_pages]
+        if invalid:
+            return jsonify({
+                'error': f'Page(s) {sorted(invalid)} out of range. '
+                         f'Document has {total_pages} pages.'
+            }), 400
+
+        if len(pages_to_remove) >= total_pages:
+            return jsonify({'error': 'Cannot remove all pages from the document.'}), 400
+
+        # Build new PDF
+        writer = PdfWriter()
+        for i in range(total_pages):
+            if (i + 1) not in pages_to_remove:
+                writer.add_page(reader.pages[i])
+
+        out_buf = io.BytesIO()
+        writer.write(out_buf)
+        out_bytes = out_buf.getvalue()
+
+        # Save to temp dir
+        remove_id    = uuid.uuid4().hex
+        temp_dir     = os.path.join(tempfile.gettempdir(), 'docshift_removepages')
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path    = os.path.join(temp_dir, f'{remove_id}.pdf')
+        out_filename = os.path.splitext(secure_filename(file.filename))[0] + '_pages_removed.pdf'
+
+        with open(temp_path, 'wb') as fh:
+            fh.write(out_bytes)
+
+        session['remove_id']       = remove_id
+        session['remove_path']     = temp_path
+        session['remove_filename'] = out_filename
+        session.modified = True
+
+        pages_remaining = total_pages - len(pages_to_remove)
+        username        = session.get('username')
+        orig_filename   = file.filename
+
+        # Fire-and-forget Cloudinary upload — does NOT block the response
+        def _upload_remove(data, folder, pub_id, fpath, orig_fn):
+            try:
+                cr = cloudinary.uploader.upload(io.BytesIO(data), folder=folder,
+                                                 resource_type='raw', public_id=pub_id)
+                store_url_in_firebase(cr.get('secure_url', ''), 'files', pub_id)
+                log_conversion('remove-pages', orig_fn, pub_id, fpath, cr.get('secure_url', ''))
+            except Exception as ce:
+                logger.warning(f'Cloudinary upload failed for remove pages: {ce}')
+
+        threading.Thread(
+            target=_upload_remove,
+            args=(out_bytes, f'storage/{username}/files',
+                  out_filename, temp_path, orig_filename),
+            daemon=True
+        ).start()
+
+        return jsonify({'pages_remaining': pages_remaining}), 200
+
+    except ValueError as ve:
+        return jsonify({'error': f'Invalid page specification: {str(ve)}'}), 400
+    except Exception as e:
+        logger.error(f'Remove pages error: {e}')
+        return jsonify({'error': f'Remove pages failed: {str(e)}'}), 500
+
+
+# ──────────────────────────────────────────────
+#  REMOVE PAGES – step 3: download result
+#  HTML calls /download-removed-pdf
+# ──────────────────────────────────────────────
+@app.route('/download-removed-pdf', methods=['GET'])
+@login_required
+def download_removed_pdf():
+    remove_path = session.get('remove_path')
+    filename    = session.get('remove_filename', 'output.pdf')
+
+    if not remove_path or not os.path.exists(remove_path):
+        return jsonify({'error': 'File not found. Please remove pages again.'}), 404
+
+    def cleanup():
+        import time; time.sleep(3)
+        try:
+            if os.path.exists(remove_path):
+                os.remove(remove_path)
+        except Exception:
+            pass
+    threading.Thread(target=cleanup, daemon=True).start()
+
+    return send_file(remove_path, as_attachment=True, download_name=filename, mimetype='application/pdf')
+
+
+# ──────────────────────────────────────────────
+#  COMPRESS PDF
+#  HTML posts to /compress  with fields: pdf, compression_level
+#  HTML expects: { success, download_url, filename, message }
+# ──────────────────────────────────────────────
+@app.route('/compress', methods=['POST'])
+@login_required
+def compress_pdf():
+    if 'pdf' not in request.files:
+        return jsonify({'success': False, 'error': 'No PDF file provided'}), 400
+
+    file              = request.files['pdf']
+    compression_level = request.form.get('compression_level', 'medium').lower()
+
+    if not file or not file.filename:
+        return jsonify({'success': False, 'error': 'No PDF file selected'}), 400
+
+    try:
+        pdf_bytes     = file.read()
+        original_size = len(pdf_bytes)
+
+        # Map level → fitz settings
+        level_map = {
+            'low':    {'garbage': 1, 'deflate': False, 'image_quality': 80},
+            'medium': {'garbage': 3, 'deflate': True,  'image_quality': 50},
+            'high':   {'garbage': 4, 'deflate': True,  'image_quality': 25},
+        }
+        settings      = level_map.get(compression_level, level_map['medium'])
+        image_quality = settings['image_quality']
+
+        # Compress with PyMuPDF + re-encode images
+        doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+        for page in doc:
+            for img_info in page.get_images(full=True):
+                xref = img_info[0]
+                try:
+                    base_img  = doc.extract_image(xref)
+                    img_bytes = base_img.get('image')
+                    if not img_bytes:
+                        continue
+                    img = Image.open(io.BytesIO(img_bytes))
+                    if img.mode in ('RGBA', 'P', 'LA'):
+                        img = img.convert('RGB')
+                    out_img_buf = io.BytesIO()
+                    img.save(out_img_buf, format='JPEG', quality=image_quality, optimize=True)
+                    doc.update_stream(xref, out_img_buf.getvalue())
+                except Exception:
+                    pass  # skip images that can't be re-compressed
+
+        compressed_bytes = doc.tobytes(
+            garbage=settings['garbage'],
+            deflate=settings['deflate'],
+            clean=True
+        )
+        doc.close()
+
+        # If fitz pass made it larger, try a lighter garbage-only pass
+        if not compressed_bytes or len(compressed_bytes) >= original_size:
+            doc2 = fitz.open(stream=pdf_bytes, filetype='pdf')
+            compressed_bytes = doc2.tobytes(garbage=2, deflate=True, clean=True)
+            doc2.close()
+
+        # If still no improvement, keep the original (already optimal PDF)
+        if len(compressed_bytes) >= original_size:
+            compressed_bytes = pdf_bytes
+
+        compressed_size = len(compressed_bytes)
+        reduction_pct   = round((1 - compressed_size / original_size) * 100, 1) if original_size > 0 else 0
+
+        # Save to temp dir
+        compress_id  = uuid.uuid4().hex
+        temp_dir     = os.path.join(tempfile.gettempdir(), 'docshift_compressed')
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path    = os.path.join(temp_dir, f'{compress_id}.pdf')
+        out_filename = os.path.splitext(secure_filename(file.filename))[0] + '_compressed.pdf'
+
+        with open(temp_path, 'wb') as fh:
+            fh.write(compressed_bytes)
+
+        session['compress_id']       = compress_id
+        session['compress_path']     = temp_path
+        session['compress_filename'] = out_filename
+        session.modified = True
+
+        username      = session.get('username')
+        orig_filename = file.filename
+
+        # Fire-and-forget Cloudinary upload — does NOT block the response
+        def _upload_compress(data, folder, pub_id, fpath, orig_fn):
+            try:
+                cr = cloudinary.uploader.upload(io.BytesIO(data), folder=folder,
+                                                 resource_type='raw', public_id=pub_id)
+                store_url_in_firebase(cr.get('secure_url', ''), 'files', pub_id)
+                log_conversion('compress-pdf', orig_fn, pub_id, fpath, cr.get('secure_url', ''))
+            except Exception as ce:
+                logger.warning(f'Cloudinary upload failed for compress PDF: {ce}')
+
+        threading.Thread(
+            target=_upload_compress,
+            args=(compressed_bytes, f'storage/{username}/files',
+                  out_filename, temp_path, orig_filename),
+            daemon=True
+        ).start()
+
+        return jsonify({
+            'success':      True,
+            'download_url': '/download-compressed-pdf',
+            'filename':     out_filename,
+            'message':      (f'Size reduced by {reduction_pct}% '
+                             f'({round(original_size / 1024, 1)} KB → '
+                             f'{round(compressed_size / 1024, 1)} KB)'),
+        }), 200
+
+    except Exception as e:
+        logger.error(f'Compress PDF error: {e}')
+        return jsonify({'success': False, 'error': f'Compression failed: {str(e)}'}), 500
+
+
+@app.route('/download-compressed-pdf', methods=['GET'])
+@login_required
+def download_compressed_pdf():
+    compress_path = session.get('compress_path')
+    filename      = session.get('compress_filename', 'compressed.pdf')
+
+    if not compress_path or not os.path.exists(compress_path):
+        return jsonify({'error': 'Compressed file not found. Please compress again.'}), 404
+
+    def cleanup():
+        import time; time.sleep(3)
+        try:
+            if os.path.exists(compress_path):
+                os.remove(compress_path)
+        except Exception:
+            pass
+    threading.Thread(target=cleanup, daemon=True).start()
+
+    return send_file(compress_path, as_attachment=True, download_name=filename, mimetype='application/pdf')
+
+
 @app.route('/document-screener')
 @login_required
 def document_screener_page():

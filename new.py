@@ -228,6 +228,70 @@ def summarize_resume_with_openrouter(text):
         return f"[OpenRouter API error: {e}]"
 
 # --- Flask Route: AI Resume Analyzer ---
+
+# =============================================================================
+# RAG (Retrieval-Augmented Generation) for AI Resume Analyzer
+# Uses only stdlib (re, difflib) - zero new dependencies, safe for deployment.
+# =============================================================================
+
+# In-memory RAG store: { username -> { filename -> [chunk, ...] } }
+_rag_store = {}
+
+def _chunk_text(text, chunk_size=400, overlap=80):
+    """Split text into overlapping word-level chunks for retrieval."""
+    words = text.split()
+    chunks = []
+    step = chunk_size - overlap
+    for i in range(0, max(1, len(words) - overlap), step):
+        chunk = ' '.join(words[i:i + chunk_size])
+        if chunk.strip():
+            chunks.append(chunk)
+    return chunks
+
+def _score_chunk(chunk, query):
+    """
+    Score a chunk against a query using keyword overlap + difflib similarity.
+    No external libraries needed - uses only stdlib.
+    """
+    import difflib
+    chunk_lower = chunk.lower()
+    query_lower = query.lower()
+    # Keyword overlap score
+    query_words = set(re.findall(r'\w+', query_lower))
+    chunk_words = set(re.findall(r'\w+', chunk_lower))
+    overlap_count = len(query_words & chunk_words)
+    keyword_score = overlap_count / max(len(query_words), 1)
+    # Sequence similarity score
+    seq_score = difflib.SequenceMatcher(None, query_lower[:200], chunk_lower[:200]).ratio()
+    return keyword_score * 0.7 + seq_score * 0.3
+
+def rag_store_resume(username, filename, raw_text):
+    """Chunk and store a resume's raw text in the in-memory RAG store."""
+    if username not in _rag_store:
+        _rag_store[username] = {}
+    _rag_store[username][filename] = _chunk_text(raw_text)
+
+def rag_retrieve(username, query, top_k=5):
+    """
+    Retrieve the top_k most relevant chunks across all resumes for a query.
+    Returns a list of dicts: {filename, chunk, score}
+    """
+    user_store = _rag_store.get(username, {})
+    scored = []
+    for filename, chunks in user_store.items():
+        for chunk in chunks:
+            score = _score_chunk(chunk, query)
+            scored.append({'filename': filename, 'chunk': chunk, 'score': score})
+    scored.sort(key=lambda x: x['score'], reverse=True)
+    return scored[:top_k]
+
+def rag_has_resumes(username):
+    """Check if any resumes are stored in RAG for this user."""
+    return bool(_rag_store.get(username))
+
+# =============================================================================
+
+
 @app.route('/ai_resume_analyzer', methods=['POST'])
 @login_required
 def ai_resume_analyzer():
@@ -236,16 +300,23 @@ def ai_resume_analyzer():
         return jsonify({"error": "No files part in the request."}), 400
     files = request.files.getlist('resumes')
     results = []
+    username = session.get('username', 'anonymous')
+    # Clear previous RAG store for this user on new upload
+    if username in _rag_store:
+        _rag_store[username] = {}
     for file_storage in files:
         filename = secure_filename(file_storage.filename)
         text = extract_text_from_file(file_storage)
+        # Store raw text in RAG for retrieval during chat
+        rag_store_resume(username, filename, text)
         summary = summarize_resume_with_openrouter(text)
         results.append({
             "filename": filename,
             "summary": summary
         })
-    # Store results in session for download
+    # Store results in session for download (summaries only, not raw text)
     session['resume_analyzer_results'] = results
+    session.modified = True
     return jsonify({"results": results})
 
 # Render the AI Resume Analyzer page
@@ -255,42 +326,66 @@ def ai_resume_analyzer_page():
     # Pass user context for navbar/profile dropdown
     return render_template('ai_resume_analyzer.html', **get_user_context())
 
-# --- Flask Route: AI Resume Analyzer Chat ---
+# --- Flask Route: AI Resume Analyzer Chat (RAG-powered) ---
 @app.route('/ai_resume_analyzer_chat', methods=['POST'])
 @login_required
 def ai_resume_analyzer_chat():
-    """Chat about the analyzed resumes (summaries in session). Unlimited chat history."""
-    data = request.get_json()
-    message = data.get('message', '')
-    history = data.get('history', [])
-    summaries = session.get('resume_analyzer_results', [])
-    if not summaries:
-        return jsonify({'reply': 'No resumes have been analyzed yet.'})
-    # Compose context for chat: all summaries
-    context = '\n\n'.join(f"Resume: {item['filename']}\nSummary: {item['summary']}" for item in summaries)
-    # Build chat history for OpenRouter (unlimited turns)
-    chat_messages = [
-        {"role": "system", "content": "You are an expert HR assistant. Answer questions based only on the following analyzed resume summaries. If the answer is not in the summaries, say you don't know. You can compare, rank, and analyze the resumes as requested.\n\n" + context}
-    ]
-    # Append all previous chat turns (no limit)
+    """Chat about analyzed resumes using RAG retrieval on raw resume text."""
+    req_data = request.get_json()
+    message = req_data.get('message', '')
+    history = req_data.get('history', [])
+    username = session.get('username', 'anonymous')
+
+    # Check RAG store first (raw text chunks), fall back to session summaries
+    if rag_has_resumes(username):
+        # RAG: retrieve most relevant chunks for the user's query
+        retrieved = rag_retrieve(username, message, top_k=6)
+        if retrieved:
+            context_parts = []
+            for item in retrieved:
+                context_parts.append(f"[From resume: {item['filename']}]\n{item['chunk']}")
+            context = "\n\n---\n\n".join(context_parts)
+        else:
+            context = "No relevant resume content found."
+        system_prompt = (
+            "You are an expert HR assistant with access to resume content retrieved for this query. "
+            "Answer based strictly on the provided resume excerpts. "
+            "If the answer is not in the excerpts, say you don't know. "
+            "You can compare, rank, and analyze candidates as requested.\n\n"
+            "Relevant resume excerpts:\n\n" + context
+        )
+    else:
+        # Fallback: use summaries from session if RAG store was lost (e.g. server restart)
+        summaries = session.get('resume_analyzer_results', [])
+        if not summaries:
+            return jsonify({'reply': 'No resumes have been analyzed yet. Please upload and analyze resumes first.'})
+        context = '\n\n'.join(f"Resume: {item['filename']}\nSummary: {item['summary']}" for item in summaries)
+        system_prompt = (
+            "You are an expert HR assistant. Answer questions based on the following resume summaries. "
+            "If the answer is not in the summaries, say you don't know.\n\n" + context
+        )
+
+    # Build chat messages for OpenRouter
+    chat_messages = [{"role": "system", "content": system_prompt}]
     for msg in history:
         if msg['role'] == 'user':
             chat_messages.append({"role": "user", "content": msg['content']})
         elif msg['role'] == 'assistant':
             chat_messages.append({"role": "assistant", "content": msg['content']})
     chat_messages.append({"role": "user", "content": message})
+
     headers = {
         'Authorization': f'Bearer {OPENROUTER_API_KEY}',
         'Content-Type': 'application/json',
     }
-    data = {
+    payload = {
         "model": OPENROUTER_MODEL,
         "messages": chat_messages,
-        "max_tokens": 1200,  # Increase token limit for more complex answers
+        "max_tokens": 1200,
         "temperature": 0.5
     }
     try:
-        response = requests.post(OPENROUTER_API_URL, headers=headers, json=data, timeout=90)
+        response = requests.post(OPENROUTER_API_URL, headers=headers, json=payload, timeout=90)
         response.raise_for_status()
         result = response.json()
         reply = result.get('choices', [{}])[0].get('message', {}).get('content', '').strip()

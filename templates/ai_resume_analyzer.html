@@ -516,23 +516,29 @@
       const chatInput = document.getElementById('chatInput');
       const message = chatInput.value.trim();
       if (!message) return;
-      chatHistory.push({role: 'user', content: message});
-      renderChat();
       chatInput.value = '';
       chatInput.disabled = true;
-      // Show loading
+      // Show loading indicator
       chatMessages.innerHTML += '<div style="color:#A259FF;margin-top:8px;">Analyzing...</div>';
-      // Send to backend
-      const response = await fetch('/ai_resume_analyzer_chat', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          message,
-          history: chatHistory,
-        })
-      });
-      const data = await response.json();
-      chatHistory.push({role: 'assistant', content: data.reply || '[No response]'});
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      try {
+        // Send history WITHOUT current message; backend appends it via 'message' field
+        const response = await fetch('/ai_resume_analyzer_chat', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            message,
+            history: chatHistory,
+          })
+        });
+        const data = await response.json();
+        // Push both turns after getting the reply
+        chatHistory.push({role: 'user', content: message});
+        chatHistory.push({role: 'assistant', content: data.reply || '[No response]'});
+      } catch(err) {
+        chatHistory.push({role: 'user', content: message});
+        chatHistory.push({role: 'assistant', content: '[Network error. Please try again.]'});
+      }
       renderChat();
       chatInput.disabled = false;
       chatInput.focus();
@@ -629,9 +635,6 @@
         `;
         document.getElementById('download-pdf-btn').onclick = function() {
           triggerDownload('/download_resume_summaries?format=pdf');
-        };
-        document.getElementById('download-excel-btn').onclick = function() {
-          triggerDownload('/download_resume_summaries?format=excel');
         };
       } else {
         resultsContainer.innerHTML = `<div style="color:red;">${data.error || 'An error occurred.'}</div>`;
